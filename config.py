@@ -19,11 +19,11 @@ if not BOT_TOKEN:
 # Если все еще нет токена, используем прямое указание
 if not BOT_TOKEN:
     # ⚠️ ВРЕМЕННО: вставьте ваш токен здесь
-    BOT_TOKEN = "BOT_TOKEN"
+    BOT_TOKEN = "8351369598:AAFbdVNxGeECfYzqLYjRD0_-QwWD55ga8NE"
     print("⚠️ DEBUG: Используется временный токен")
 
 # Администраторы бота
-ADMIN_IDS = ["telegram_id"]  # ⚠️ Добавлен второй администратор
+ADMIN_IDS = ["8473513085,356633485"]  # ⚠️ Добавлен второй администратор
 
 # Настройки бонусов
 WELCOME_BONUS = 100
@@ -43,4 +43,5 @@ LOG_FILE = 'bot_errors.log'
 if not BOT_TOKEN:
     raise ValueError("❌ Токен бота не найден!")
 else:
+
     print(f"✅ Токен успешно загружен: {BOT_TOKEN[:10]}...")
