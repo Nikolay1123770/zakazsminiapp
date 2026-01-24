@@ -2,6 +2,7 @@ import logging
 import os
 import warnings
 import asyncio
+from pathlib import Path
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.warnings import PTBUserWarning
@@ -12,6 +13,7 @@ from error_logger import setup_error_logging
 # Импорт для веб-сервера
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import uvicorn
 
 # Игнорировать предупреждения PTBUserWarning
@@ -30,11 +32,256 @@ logger = logging.getLogger(__name__)
 # Инициализация системы логирования ошибок
 setup_error_logging()
 
-# Создаем FastAPI приложение для MiniApp
-web_app = FastAPI()
+# Создаем папку static, если её нет
+STATIC_DIR = Path("static")
+if not STATIC_DIR.exists():
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("📁 Создана папка 'static' для MiniApp")
 
-# Настраиваем раздачу статики из папки "static"
-web_app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Создаем базовый index.html, если его нет
+INDEX_FILE = STATIC_DIR / "index.html"
+if not INDEX_FILE.exists():
+    with open(INDEX_FILE, "w", encoding="utf-8") as f:
+        f.write("""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vovsetyagskie - MiniApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .logo {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .subtitle {
+            font-size: 18px;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+        
+        .status-box {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 30px 0;
+            text-align: left;
+        }
+        
+        .features {
+            text-align: left;
+            margin: 20px 0;
+        }
+        
+        .feature {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            font-size: 16px;
+        }
+        
+        .feature-icon {
+            font-size: 24px;
+            margin-right: 15px;
+            width: 40px;
+        }
+        
+        .button {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .telegram-info {
+            margin-top: 30px;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🍽️</div>
+        <h1>Vovsetyagskie</h1>
+        <p class="subtitle">Телеграм мини-приложение ресторана</p>
+        
+        <div class="status-box">
+            <h3>📱 Статус приложения</h3>
+            <div id="status">Инициализация...</div>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">🍽️</span>
+                <span>Просмотр меню с актуальными ценами</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📅</span>
+                <span>Бронирование столов онлайн</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">💰</span>
+                <span>Баланс бонусных баллов</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📋</span>
+                <span>История заказов и бронирований</span>
+            </div>
+        </div>
+        
+        <button class="button" onclick="openInTelegram()">Открыть в Telegram</button>
+        
+        <div class="telegram-info">
+            ⚡ Это приложение оптимизировано для Telegram WebApp
+        </div>
+    </div>
+    
+    <script>
+        // Инициализация Telegram Web App
+        const tg = window.Telegram.WebApp;
+        
+        // Функция обновления статуса
+        function updateStatus() {
+            const statusElement = document.getElementById('status');
+            
+            if (tg.initDataUnsafe.user) {
+                const user = tg.initDataUnsafe.user;
+                statusElement.innerHTML = `
+                    ✅ Приложение загружено<br>
+                    👤 Пользователь: ${user.first_name}${user.last_name ? ' ' + user.last_name : ''}<br>
+                    📱 Платформа: ${tg.platform}<br>
+                    🆔 ID: ${user.id}
+                `;
+                
+                // Расширяем на весь экран
+                tg.expand();
+                
+                // Уведомляем Telegram, что приложение готово
+                tg.ready();
+                
+                console.log('✅ Telegram WebApp инициализирован');
+                console.log('Пользователь:', user);
+            } else {
+                statusElement.innerHTML = `
+                    ⚠️ Приложение запущено в браузере<br>
+                    Для полного функционала откройте через Telegram бота
+                `;
+            }
+        }
+        
+        // Функция для открытия в Telegram
+        function openInTelegram() {
+            if (tg.platform !== 'unknown') {
+                // Уже в Telegram
+                tg.showAlert('Вы уже в Telegram приложении!');
+            } else {
+                // Открыть в Telegram
+                const botUsername = 'vovsetyagskie_bot'; // Замените на username вашего бота
+                const webAppUrl = window.location.href;
+                window.open(`https://t.me/${botUsername}?start=webapp`, '_blank');
+            }
+        }
+        
+        // Обновляем статус при загрузке
+        document.addEventListener('DOMContentLoaded', updateStatus);
+        
+        // Также обновляем статус, если Telegram WebApp загрузится позже
+        if (tg.initDataUnsafe) {
+            updateStatus();
+        }
+        
+        // Для отладки
+        console.log('🚀 MiniApp запущен!');
+        console.log('Telegram WebApp:', tg);
+        console.log('User data:', tg.initDataUnsafe.user);
+    </script>
+</body>
+</html>""")
+    logger.info("📄 Создан index.html в папке static")
+
+# Создаем FastAPI приложение для MiniApp
+web_app = FastAPI(title="Vovsetyagskie MiniApp")
+
+# Настраиваем раздачу статики
+web_app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Основной маршрут для MiniApp
+@web_app.get("/")
+async def serve_miniapp():
+    """Основной маршрут для MiniApp"""
+    return FileResponse("static/index.html")
+
+# Маршрут для проверки здоровья
+@web_app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "miniapp", "port": 3000}
+
+# Маршрут для favicon
+@web_app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/favicon.ico")
+
+# Создаем favicon.ico если его нет
+FAVICON_FILE = STATIC_DIR / "favicon.ico"
+if not FAVICON_FILE.exists():
+    # Создаем простой favicon
+    from PIL import Image, ImageDraw
+    img = Image.new('RGB', (64, 64), color=(102, 126, 234))
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 20), "V", fill=(255, 255, 255))
+    img.save(FAVICON_FILE, "ICO")
+    logger.info("🎨 Создан favicon.ico")
 
 # Функция для запуска веб-сервера
 async def run_web_server():
@@ -43,7 +290,9 @@ async def run_web_server():
         web_app, 
         host="0.0.0.0", 
         port=3000,
-        log_level="info"
+        log_level="info",
+        access_log=True,
+        reload=False
     )
     server = uvicorn.Server(config)
     logger.info("🌐 Веб-сервер MiniApp запускается на порту 3000")
@@ -61,90 +310,29 @@ async def post_init(application):
     # Проверяем настройки MiniApp
     if MINIAPP_URL:
         logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
+        
+        # Проверяем доступность MiniApp
+        try:
+            import aiohttp
+            import asyncio
+            
+            async def check_miniapp():
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(MINIAPP_URL, timeout=5) as response:
+                            if response.status == 200:
+                                logger.info(f"✅ MiniApp доступен по адресу {MINIAPP_URL}")
+                            else:
+                                logger.warning(f"⚠️ MiniApp отвечает с кодом {response.status}")
+                except Exception as e:
+                    logger.warning(f"❌ Не удалось проверить MiniApp: {e}")
+            
+            # Запускаем проверку в фоне
+            asyncio.create_task(check_miniapp())
+        except:
+            pass
     else:
         logger.warning("⚠️ MiniApp URL не настроен в конфигурации")
-    
-    # Проверяем существование папки static
-    if not os.path.exists("static"):
-        os.makedirs("static")
-        logger.warning("📁 Создана папка 'static' для MiniApp")
-        
-        # Создаем минимальный index.html
-        with open("static/index.html", "w", encoding="utf-8") as f:
-            f.write("""<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vovsetyagskie - MiniApp</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            text-align: center;
-        }
-        h1 {
-            margin-top: 50px;
-        }
-        .status {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 20px;
-            border-radius: 10px;
-            margin: 30px 0;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🎉 Vovsetyagskie MiniApp</h1>
-        <p>Телеграм мини-приложение успешно запущено!</p>
-        
-        <div class="status">
-            <p id="status">Загрузка...</p>
-        </div>
-        
-        <p>Используйте бота для навигации по функциям:</p>
-        <ul style="text-align: left; display: inline-block;">
-            <li>🍽️ Просмотр меню</li>
-            <li>📅 Бронирование столов</li>
-            <li>💰 Проверка баланса</li>
-            <li>📋 История заказов</li>
-        </ul>
-    </div>
-    
-    <script>
-        // Инициализация Telegram Web App
-        const tg = window.Telegram.WebApp;
-        
-        // Растягиваем на весь экран
-        tg.expand();
-        
-        // Уведомляем Telegram, что приложение готово
-        tg.ready();
-        
-        // Обновляем статус
-        document.getElementById('status').innerHTML = `
-            ✅ MiniApp загружен<br>
-            👤 Пользователь: ${tg.initDataUnsafe.user?.first_name || 'Гость'}<br>
-            📱 Платформа: ${tg.platform}
-        `;
-        
-        // Логируем данные для отладки
-        console.log('Telegram WebApp initialized:', tg);
-        console.log('User:', tg.initDataUnsafe.user);
-    </script>
-</body>
-</html>""")
-        logger.info("📄 Создан index.html в папке static")
 
 async def post_stop(application):
     """Функция, выполняемая при остановке бота"""
@@ -550,6 +738,9 @@ async def main():
         web_server_task = asyncio.create_task(run_web_server())
         logger.info("🚀 Запуск веб-сервера MiniApp...")
 
+        # Даем веб-серверу время запуститься
+        await asyncio.sleep(1)
+
         # Создание приложения бота
         application = Application.builder() \
             .token(BOT_TOKEN) \
@@ -584,6 +775,8 @@ async def main():
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при запуске бота: {e}", exc_info=True)
         print(f"❌ Ошибка: {e}")
+    finally:
+        logger.info("🛑 Приложение завершено")
 
 if __name__ == '__main__':
     # Запускаем асинхронную основную функцию
