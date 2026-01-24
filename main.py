@@ -1,12 +1,18 @@
 import logging
 import os
 import warnings
+import asyncio
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.warnings import PTBUserWarning
 from dotenv import load_dotenv
 from config import BOT_TOKEN, ADMIN_IDS, MINIAPP_URL
 from error_logger import setup_error_logging
+
+# Импорт для веб-сервера
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 # Игнорировать предупреждения PTBUserWarning
 warnings.filterwarnings("ignore", category=PTBUserWarning)
@@ -24,6 +30,25 @@ logger = logging.getLogger(__name__)
 # Инициализация системы логирования ошибок
 setup_error_logging()
 
+# Создаем FastAPI приложение для MiniApp
+web_app = FastAPI()
+
+# Настраиваем раздачу статики из папки "static"
+web_app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+# Функция для запуска веб-сервера
+async def run_web_server():
+    """Запуск веб-сервера для MiniApp на порту 3000"""
+    config = uvicorn.Config(
+        web_app, 
+        host="0.0.0.0", 
+        port=3000,
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    logger.info("🌐 Веб-сервер MiniApp запускается на порту 3000")
+    await server.serve()
+
 async def post_init(application):
     """Функция, выполняемая после инициализации бота"""
     logger.info("🤖 Бот успешно запущен и готов к работе!")
@@ -38,6 +63,88 @@ async def post_init(application):
         logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
     else:
         logger.warning("⚠️ MiniApp URL не настроен в конфигурации")
+    
+    # Проверяем существование папки static
+    if not os.path.exists("static"):
+        os.makedirs("static")
+        logger.warning("📁 Создана папка 'static' для MiniApp")
+        
+        # Создаем минимальный index.html
+        with open("static/index.html", "w", encoding="utf-8") as f:
+            f.write("""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vovsetyagskie - MiniApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        h1 {
+            margin-top: 50px;
+        }
+        .status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 30px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 Vovsetyagskie MiniApp</h1>
+        <p>Телеграм мини-приложение успешно запущено!</p>
+        
+        <div class="status">
+            <p id="status">Загрузка...</p>
+        </div>
+        
+        <p>Используйте бота для навигации по функциям:</p>
+        <ul style="text-align: left; display: inline-block;">
+            <li>🍽️ Просмотр меню</li>
+            <li>📅 Бронирование столов</li>
+            <li>💰 Проверка баланса</li>
+            <li>📋 История заказов</li>
+        </ul>
+    </div>
+    
+    <script>
+        // Инициализация Telegram Web App
+        const tg = window.Telegram.WebApp;
+        
+        // Растягиваем на весь экран
+        tg.expand();
+        
+        // Уведомляем Telegram, что приложение готово
+        tg.ready();
+        
+        // Обновляем статус
+        document.getElementById('status').innerHTML = `
+            ✅ MiniApp загружен<br>
+            👤 Пользователь: ${tg.initDataUnsafe.user?.first_name || 'Гость'}<br>
+            📱 Платформа: ${tg.platform}
+        `;
+        
+        // Логируем данные для отладки
+        console.log('Telegram WebApp initialized:', tg);
+        console.log('User:', tg.initDataUnsafe.user);
+    </script>
+</body>
+</html>""")
+        logger.info("📄 Создан index.html в папке static")
 
 async def post_stop(application):
     """Функция, выполняемая при остановке бота"""
@@ -381,7 +488,6 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(handle_bonus_request_action, pattern="^(approve_|reject_)"))
 
     # 6. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
-    # (оставляем без изменений, как в предыдущей версии)
     application.add_handler(CallbackQueryHandler(handle_create_order, pattern="^create_order$"))
     application.add_handler(CallbackQueryHandler(handle_category_selection, pattern="^category_"))
     application.add_handler(CallbackQueryHandler(handle_item_selection, pattern="^item_"))
@@ -422,8 +528,8 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("reset_shift", reset_shift_data))
     application.add_handler(CommandHandler("debug_shifts", debug_shifts))
-    application.add_handler(CommandHandler("webapp", open_miniapp))  # НОВАЯ КОМАНДА
-    application.add_handler(CommandHandler("test_miniapp", test_miniapp))  # НОВАЯ КОМАНДА ТЕСТА
+    application.add_handler(CommandHandler("webapp", open_miniapp))
+    application.add_handler(CommandHandler("test_miniapp", test_miniapp))
 
     # 8. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Назад$"), handle_back_button))
@@ -432,15 +538,19 @@ def setup_handlers(application):
     # 9. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unknown_message))
 
-def main():
-    """Основная функция запуска бота"""
+async def main():
+    """Основная асинхронная функция запуска бота и веб-сервера"""
     try:
         # Проверка токена
         if not BOT_TOKEN:
             logger.error("❌ Токен бота не найден! Проверьте файл .env")
             return
 
-        # Создание приложения
+        # Запускаем веб-сервер в фоне
+        web_server_task = asyncio.create_task(run_web_server())
+        logger.info("🚀 Запуск веб-сервера MiniApp...")
+
+        # Создание приложения бота
         application = Application.builder() \
             .token(BOT_TOKEN) \
             .post_init(post_init) \
@@ -448,26 +558,33 @@ def main():
             .build()
 
         # Настройка обработчиков
-        logger.info("🔄 Настройка обработчиков...")
+        logger.info("🔄 Настройка обработчиков бота...")
         setup_handlers(application)
 
         # Запуск бота
-        logger.info("🚀 Запуск бота...")
+        logger.info("🤖 Запуск Telegram бота...")
         print("=" * 50)
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
         print("🌐 MiniApp доступен по команде /webapp")
+        print(f"🌐 Веб-сервер работает на: http://localhost:3000")
+        print(f"🌐 Внешний доступ: {MINIAPP_URL}")
         print("=" * 50)
 
-        application.run_polling(
+        # Запускаем бота
+        await application.run_polling(
             allowed_updates=['message', 'callback_query'],
             timeout=60,
             drop_pending_updates=True,
             poll_interval=0.5
         )
 
+        # Ждем завершения задачи веб-сервера
+        await web_server_task
+
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при запуске бота: {e}", exc_info=True)
         print(f"❌ Ошибка: {e}")
 
 if __name__ == '__main__':
-    main()
+    # Запускаем асинхронную основную функцию
+    asyncio.run(main())
