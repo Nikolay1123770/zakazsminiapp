@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hookah Lounge App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+        .header {
+            background: linear-gradient(135deg, #4a6fa5 0%, #6c5ce7 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: white;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #6c5ce7;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        .content {
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 25px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .stat-card:nth-child(2) { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .stat-card:nth-child(3) { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .stat-card:nth-child(4) { background: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .menu-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .menu-item:hover {
+            border-color: #6c5ce7;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(108, 92, 231, 0.1);
+        }
+        .menu-item h4 {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .menu-item p {
+            font-size: 16px;
+            font-weight: bold;
+            color: #6c5ce7;
+        }
+        .btn {
+            background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+            transition: transform 0.3s ease;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .btn-secondary {
+            background: linear-gradient(135deg, #dfe6e9 0%, #b2bec3 100%);
+            color: #2d3436;
+        }
+        .order-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .order-item:last-child {
+            border-bottom: none;
+        }
+        .total {
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+        .loader {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: #00b894;
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 1000;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .error { background: #e74c3c; }
+        .success { background: #00b894; }
+    </style>
+</head>
+<body>
+    <div class="loader" id="loader">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="container" id="app" style="display: none;">
+        <div class="header">
+            <div class="logo">🍹</div>
+            <h1>Hookah Lounge</h1>
+            <p>Ваш кальян-бар</p>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <div class="section-title">📊 Моя статистика</div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="balance">0</div>
+                        <div class="stat-label">Баллов</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="bookings">0</div>
+                        <div class="stat-label">Бронирований</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="orders">0</div>
+                        <div class="stat-label">Заказов</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="referrals">0</div>
+                        <div class="stat-label">Рефералов</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">📋 Популярные позиции</div>
+                <div class="menu-grid" id="menuGrid">
+                    <!-- Меню загрузится динамически -->
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">⚡ Быстрые действия</div>
+                <button class="btn" onclick="createOrder()">
+                    🍽️ Создать заказ
+                </button>
+                <button class="btn btn-secondary" onclick="bookTable()">
+                    📅 Забронировать стол
+                </button>
+                <button class="btn btn-secondary" onclick="showContacts()">
+                    📞 Контакты
+                </button>
+                <button class="btn btn-secondary" onclick="refreshData()">
+                    🔄 Обновить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.MainButton.setText("Обновить");
+        tg.MainButton.onClick(refreshData);
+        tg.MainButton.show();
+
+        let userData = {};
+
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        function createOrder() {
+            tg.showPopup({
+                title: 'Создание заказа',
+                message: 'Для создания заказа используйте основное меню бота или обратитесь к администратору.',
+                buttons: [{type: 'ok'}]
+            });
+        }
+
+        function bookTable() {
+            tg.showPopup({
+                title: 'Бронирование стола',
+                message: 'Введите дату и время бронирования:',
+                buttons: [
+                    {id: 'today', type: 'default', text: '📅 Сегодня'},
+                    {id: 'tomorrow', type: 'default', text: '📆 Завтра'},
+                    {id: 'cancel', type: 'cancel', text: '❌ Отмена'}
+                ]
+            }, function(btnId) {
+                if (btnId === 'today' || btnId === 'tomorrow') {
+                    const date = btnId === 'today' ? 'сегодня' : 'завтра';
+                    const time = prompt('Введите время (например, 19:00):', '19:00') || '19:00';
+                    
+                    tg.sendData(JSON.stringify({
+                        type: 'booking',
+                        date: date,
+                        time: time
+                    }));
+                    
+                    showNotification(`✅ Бронирование на ${date} в ${time} отправлено`);
+                }
+            });
+        }
+
+        function showContacts() {
+            tg.sendData(JSON.stringify({type: 'contacts'}));
+        }
+
+        function refreshData() {
+            tg.sendData(JSON.stringify({type: 'refresh'}));
+            showNotification('🔄 Обновление данных...');
+        }
+
+        function loadMenu() {
+            const menuItems = [
+                {name: 'Пенсионный', price: 800},
+                {name: 'Стандарт', price: 1000},
+                {name: 'Премиум', price: 1200},
+                {name: 'Вода', price: 100},
+                {name: 'Кола 0,5л', price: 100},
+                {name: 'Да Хун Пао', price: 400}
+            ];
+
+            const menuGrid = document.getElementById('menuGrid');
+            menuGrid.innerHTML = menuItems.map(item => `
+                <div class="menu-item" onclick="showNotification('${item.name} добавлен в заказ')">
+                    <h4>${item.name}</h4>
+                    <p>${item.price} ₽</p>
+                </div>
+            `).join('');
+        }
+
+        tg.onEvent('webAppDataReceived', function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'user_data') {
+                    userData = data;
+                    
+                    document.getElementById('balance').textContent = data.balance || 0;
+                    document.getElementById('bookings').textContent = data.bookings || 0;
+                    document.getElementById('orders').textContent = data.orders || 0;
+                    document.getElementById('referrals').textContent = data.referrals || 0;
+                    
+                    document.getElementById('loader').style.display = 'none';
+                    document.getElementById('app').style.display = 'block';
+                    
+                    loadMenu();
+                    showNotification('✅ Данные загружены');
+                }
+            } catch (e) {
+                console.error('Error:', e);
+            }
+        });
+
+        tg.ready();
+        tg.sendData(JSON.stringify({type: 'init'}));
+
+        setTimeout(() => {
+            if (document.getElementById('loader').style.display !== 'none') {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                loadMenu();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>
