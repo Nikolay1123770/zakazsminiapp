@@ -12,7 +12,8 @@ class Database:
         self.conn = sqlite3.connect(DB_NAME, check_same_thread=False)
         self.create_tables()
         self.fix_menu_categories()
-        self.add_payment_method_column()  # <-- Добавьте эту строку
+        self.add_payment_method_column()
+        self.create_miniapp_tables()  # Создаем таблицы для MiniApp
 
     def get_moscow_time(self):
         """Получить текущее время в московском часовом поясе"""
@@ -23,7 +24,7 @@ class Database:
         """Создание всех таблиц с правильной структурой"""
         cursor = self.conn.cursor()
 
-        # Сначала создаем все остальные таблицы
+        # Создаем все остальные таблицы
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,6 +36,8 @@ class Database:
                 registration_date TEXT,
                 is_active BOOLEAN DEFAULT TRUE,
                 referred_by INTEGER DEFAULT NULL,
+                total_spent INTEGER DEFAULT 0,
+                total_orders INTEGER DEFAULT 0,
                 FOREIGN KEY (referred_by) REFERENCES users (id)
             )
         ''')
@@ -58,8 +61,12 @@ class Database:
                 booking_date TEXT,
                 booking_time TEXT,
                 guests INTEGER,
+                comment TEXT,
                 status TEXT DEFAULT 'pending',
                 created_at TEXT,
+                source TEXT DEFAULT 'bot',
+                customer_name TEXT,
+                customer_phone TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
@@ -94,7 +101,8 @@ class Database:
                 admin_id INTEGER,
                 status TEXT DEFAULT 'active', -- 'active' или 'closed'
                 created_at TEXT,
-                closed_at TEXT
+                closed_at TEXT,
+                payment_method TEXT DEFAULT NULL
             )
         ''')
 
@@ -120,7 +128,7 @@ class Database:
             )
         ''')
 
-        # Проверяем, существует ли уже таблица shifts с правильным индексом
+        # Проверяем таблицу shifts
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shifts'")
         shifts_table_exists = cursor.fetchone()
 
@@ -128,30 +136,21 @@ class Database:
         index_exists = cursor.fetchone()
 
         if not shifts_table_exists or not index_exists:
-            # Нужно создать или обновить таблицу shifts
             print("🔄 Создаем/обновляем таблицу shifts...")
-
-            # Временно отключаем foreign keys
             cursor.execute('PRAGMA foreign_keys = OFF')
 
-            # Переименовываем существующие таблицы если они есть
             if shifts_table_exists:
-                print("🔄 Переименовываем старую таблицу shifts...")
                 cursor.execute('ALTER TABLE shifts RENAME TO shifts_old')
 
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shift_sales'")
-            shift_sales_exists = cursor.fetchone()
-
-            if shift_sales_exists:
-                print("🔄 Переименовываем старую таблицу shift_sales...")
+            if cursor.fetchone():
                 cursor.execute('ALTER TABLE shift_sales RENAME TO shift_sales_old')
 
-            # Создаем новую таблицу смен с составным уникальным ключом
             cursor.execute('''
                 CREATE TABLE shifts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     shift_number INTEGER,
-                    month_year TEXT, -- Формат: 'YYYY-MM' для группировки по месяцам
+                    month_year TEXT,
                     admin_id INTEGER,
                     opened_at TEXT,
                     closed_at TEXT,
@@ -162,14 +161,9 @@ class Database:
                 )
             ''')
 
-            # Создаем составной уникальный индекс если его нет
             if not index_exists:
                 cursor.execute('CREATE UNIQUE INDEX idx_shift_month ON shifts (shift_number, month_year)')
-                print("✅ Составной уникальный индекс создан")
-            else:
-                print("✅ Индекс уже существует")
 
-            # Создаем таблицу статистики продаж
             cursor.execute('''
                 CREATE TABLE shift_sales (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,10 +175,8 @@ class Database:
                 )
             ''')
 
-            # Восстанавливаем данные из старой таблицы если она существовала
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shifts_old'")
             if cursor.fetchone():
-                print("🔄 Восстанавливаем данные из старой таблицы shifts...")
                 cursor.execute('''
                     INSERT INTO shifts (id, shift_number, month_year, admin_id, opened_at, closed_at, 
                                       total_revenue, total_orders, status)
@@ -206,27 +198,138 @@ class Database:
                         FROM shift_sales_old
                     ''')
 
-                # Удаляем временные таблицы
                 cursor.execute('DROP TABLE IF EXISTS shifts_old')
                 cursor.execute('DROP TABLE IF EXISTS shift_sales_old')
 
-                print("✅ Данные успешно восстановлены")
-
-            # Включаем foreign keys обратно
             cursor.execute('PRAGMA foreign_keys = ON')
         else:
             print("✅ Таблица shifts уже существует с правильным индексом")
 
         self.conn.commit()
-
-        # Проверяем и добавляем отсутствующие колонки
         self._update_schema()
-
-        # После создания таблицы заполнить её данными
         self.populate_menu_items()
-
-        # Проверяем и исправляем категории меню
         self.fix_menu_categories()
+
+    def create_miniapp_tables(self):
+        """Создать таблицы для MiniApp"""
+        cursor = self.conn.cursor()
+        
+        # Таблица для конфигурации MiniApp
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS miniapp_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT,
+                description TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(section, key)
+            )
+        ''')
+        
+        # Таблица для меню MiniApp (расширенная)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS miniapp_menu (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                price INTEGER NOT NULL,
+                old_price INTEGER DEFAULT NULL,
+                category TEXT NOT NULL,
+                icon TEXT DEFAULT '🍽️',
+                badge TEXT DEFAULT NULL,
+                position INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(name)
+            )
+        ''')
+        
+        # Таблица для галереи
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS miniapp_gallery (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                emoji TEXT DEFAULT '📸',
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                position INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        self.conn.commit()
+        
+        # Добавляем базовую конфигурацию
+        default_config = [
+            ('contacts', 'address', 'ул. Химическая, 52', 'Адрес заведения'),
+            ('contacts', 'phone', '+7 (999) 123-45-67', 'Телефон для связи'),
+            ('contacts', 'instagram', '@vovseTyajkie', 'Instagram профиль'),
+            ('schedule', 'weekdays', '14:00 — 02:00', 'Время работы Пн-Чт'),
+            ('schedule', 'weekend', '14:00 — 04:00', 'Время работы Пт-Вс'),
+            ('stats', 'flavors', '50+', 'Количество вкусов'),
+            ('stats', 'experience', '5', 'Лет опыта'),
+            ('stats', 'guests', '10K', 'Количество гостей'),
+            ('miniapp', 'welcome_message', 'Добро пожаловать!', 'Приветственное сообщение'),
+            ('miniapp', 'theme', 'dark', 'Тема приложения'),
+            ('miniapp', 'primary_color', '#a855f7', 'Основной цвет')
+        ]
+        
+        for config_item in default_config:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO miniapp_config (section, key, value, description)
+                    VALUES (?, ?, ?, ?)
+                ''', config_item)
+            except:
+                pass
+        
+        # Добавляем базовые товары для MiniApp
+        default_menu = [
+            ('Классический', 'Один вкус премиум табака на выбор', 1200, 1500, 'hookah', '💨', 'hit', 1),
+            ('Premium', 'Tangiers, Darkside, Element — топовые табаки мира', 1800, None, 'hookah', '🔮', 'premium', 2),
+            ('VIP Кальян', 'Эксклюзивные табаки + фрукты + авторская подача', 2500, None, 'hookah', '👑', 'vip', 3),
+            ('Blue Crystal', 'Ледяная свежесть с нотками мяты и цитруса', 2000, None, 'signature', '🧊', 'hit', 1),
+            ('Heisenberg', 'Секретный рецепт шефа. 99.1% чистого наслаждения', 2200, None, 'signature', '⚗️', 'signature', 2),
+            ('Los Pollos', 'Пряный микс с перцем и тропическими фруктами', 2000, None, 'signature', '🔥', 'hot', 3),
+            ('Чай (чайник)', 'Чёрный, зелёный, фруктовый или травяной', 400, None, 'drinks', '🍵', None, 1),
+            ('Лимонады', 'Клубничный, цитрусовый, мохито, манго', 350, None, 'drinks', '🍹', None, 2),
+            ('Кофе', 'Эспрессо, американо, капучино, латте, раф', 250, None, 'drinks', '☕', None, 3),
+            ('Пицца', 'Маргарита, Пепперони, 4 сыра, BBQ курица', 650, None, 'food', '🍕', None, 1),
+            ('Салаты', 'Цезарь, Греческий, с креветками', 450, None, 'food', '🥗', None, 2),
+            ('Закуски', 'Картофель фри, наггетсы, сырные палочки', 350, None, 'food', '🍟', None, 3)
+        ]
+        
+        for menu_item in default_menu:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO miniapp_menu (name, description, price, old_price, category, icon, badge, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', menu_item)
+            except:
+                pass
+        
+        # Добавляем галерею
+        default_gallery = [
+            ('Лаборатория вкусов', '🧪', 'Авторские миксы', 1),
+            ('Премиум кальяны', '💨', 'Эксклюзивные табаки', 2),
+            ('VIP зона', '🛋️', 'Уютная атмосфера', 3),
+            ('Коктейли', '🍹', 'Авторские напитки', 4),
+            ('Вечерние посиделки', '🔥', 'Атмосферные вечера', 5),
+            ('Кухня', '⚗️', 'Вкусные закуски', 6)
+        ]
+        
+        for gallery_item in default_gallery:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO miniapp_gallery (title, emoji, description, position)
+                    VALUES (?, ?, ?, ?)
+                ''', gallery_item)
+            except:
+                pass
+        
+        self.conn.commit()
+        logger.info("✅ Таблицы для MiniApp созданы/проверены")
 
     def _update_schema(self):
         """Обновляет схему базы данных, добавляя отсутствующие колонки"""
@@ -237,67 +340,71 @@ class Database:
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'referred_by' not in columns:
-            print("🔄 Добавляем колонку referred_by в таблицу users...")
             cursor.execute('ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT NULL')
-            self.conn.commit()
-            print("✅ Колонка referred_by добавлена")
 
         # Проверяем наличие колонки closed_at в таблице orders
         cursor.execute("PRAGMA table_info(orders)")
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'closed_at' not in columns:
-            print("🔄 Добавляем колонку closed_at в таблицу orders...")
             cursor.execute('ALTER TABLE orders ADD COLUMN closed_at TEXT')
-            self.conn.commit()
-            print("✅ Колонка closed_at добавлена")
 
-        # ========== ДОБАВЛЕНО: Проверка payment_method в orders ==========
-        # Нужно заново получить колонки, так как orders мог измениться
+        # Проверяем наличие колонки payment_method в orders
         cursor.execute("PRAGMA table_info(orders)")
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'payment_method' not in columns:
-            print("🔄 Добавляем колонку payment_method в таблицу orders...")
             cursor.execute('ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT NULL')
-            self.conn.commit()
-            print("✅ Колонка payment_method добавлена")
-        # ========== КОНЕЦ ДОБАВЛЕНИЯ ==========
 
-        # Проверяем наличие колонку month_year в таблице shifts
+        # Проверяем наличие колонки month_year в таблице shifts
         cursor.execute("PRAGMA table_info(shifts)")
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'month_year' not in columns:
-            print("🔄 Добавляем колонку month_year в таблицу shifts...")
             cursor.execute('ALTER TABLE shifts ADD COLUMN month_year TEXT')
-
-            # Обновляем существующие записи
             cursor.execute('SELECT id, opened_at FROM shifts')
             shifts = cursor.fetchall()
             for shift_id, opened_at in shifts:
                 if opened_at:
-                    month_year = opened_at[:7]  # Берем YYYY-MM
+                    month_year = opened_at[:7]
                     cursor.execute('UPDATE shifts SET month_year = ? WHERE id = ?', (month_year, shift_id))
-
-            self.conn.commit()
-            print("✅ Колонка month_year добавлена")
 
         # Проверяем наличие колонки is_active в таблице menu_items
         cursor.execute("PRAGMA table_info(menu_items)")
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'is_active' not in columns:
-            print("🔄 Добавляем колонку is_active в таблицу menu_items...")
             cursor.execute('ALTER TABLE menu_items ADD COLUMN is_active BOOLEAN DEFAULT TRUE')
-            self.conn.commit()
-            print("✅ Колонка is_active добавлена")
+
+        # Проверяем наличие колонок для MiniApp в bookings
+        cursor.execute("PRAGMA table_info(bookings)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if 'source' not in columns:
+            cursor.execute('ALTER TABLE bookings ADD COLUMN source TEXT DEFAULT "bot"')
+        
+        if 'customer_name' not in columns:
+            cursor.execute('ALTER TABLE bookings ADD COLUMN customer_name TEXT')
+        
+        if 'customer_phone' not in columns:
+            cursor.execute('ALTER TABLE bookings ADD COLUMN customer_phone TEXT')
+
+        # Добавляем колонки total_spent и total_orders в users если их нет
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if 'total_spent' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN total_spent INTEGER DEFAULT 0')
+        
+        if 'total_orders' not in columns:
+            cursor.execute('ALTER TABLE users ADD COLUMN total_orders INTEGER DEFAULT 0')
+
+        self.conn.commit()
 
     def fix_menu_categories(self):
         """Исправить категории в меню если необходимо"""
         cursor = self.conn.cursor()
 
-        # Список кальянов для проверки
         hookah_items = ["Пенсионный", "Стандарт", "Премиум", "Фруктовая чаша", "Сигарный", "Парфюм"]
 
         for item_name in hookah_items:
@@ -305,19 +412,14 @@ class Database:
             result = cursor.fetchone()
 
             if result and result[0] != 'Кальяны':
-                print(f"🔄 Исправляем категорию для {item_name}: было '{result[0]}', станет 'Кальяны'")
                 cursor.execute('UPDATE menu_items SET category = ? WHERE name = ?', ('Кальяны', item_name))
-            elif not result:
-                print(f"⚠️ Позиция {item_name} не найдена в базе данных")
 
         self.conn.commit()
-        print("✅ Категории меню проверены и исправлены при необходимости")
 
     def populate_menu_items(self):
         """Заполнить таблицу menu_items базовыми данными"""
         cursor = self.conn.cursor()
 
-        # Проверяем, есть ли уже данные в таблице
         cursor.execute('SELECT COUNT(*) FROM menu_items')
         count = cursor.fetchone()[0]
 
@@ -370,116 +472,224 @@ class Database:
                         (name, price, category, True)
                     )
                 except sqlite3.IntegrityError:
-                    # Если позиция уже существует, пропускаем
                     continue
 
             self.conn.commit()
-            print("✅ Таблица menu_items заполнена данными")
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ УПРАВЛЕНИЯ МЕНЮ
-    def get_all_menu_categories(self):
-        """Получить все категории меню"""
+    # ========== МЕТОДЫ ДЛЯ MINIAPP ==========
+
+    def get_miniapp_menu(self, category=None):
+        """Получить меню для MiniApp"""
         cursor = self.conn.cursor()
-        cursor.execute('SELECT DISTINCT category FROM menu_items WHERE is_active = TRUE ORDER BY category')
-        categories = cursor.fetchall()
-        return [category[0] for category in categories] if categories else []
+        
+        if category:
+            cursor.execute('''
+                SELECT id, name, description, price, old_price, category, icon, badge 
+                FROM miniapp_menu 
+                WHERE category = ? AND is_active = TRUE 
+                ORDER BY position, name
+            ''', (category,))
+        else:
+            cursor.execute('''
+                SELECT id, name, description, price, old_price, category, icon, badge 
+                FROM miniapp_menu 
+                WHERE is_active = TRUE 
+                ORDER BY category, position, name
+            ''')
+        
+        return cursor.fetchall()
 
-    def get_menu_items_by_category(self, category):
-        """Получить все позиции меню по категории"""
+    def get_miniapp_menu_item(self, item_id):
+        """Получить товар из меню MiniApp по ID"""
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT id, name, price, category, is_active 
-            FROM menu_items 
-            WHERE category = ? AND is_active = TRUE 
-            ORDER BY name
+            SELECT id, name, description, price, old_price, category, icon, badge 
+            FROM miniapp_menu 
+            WHERE id = ? AND is_active = TRUE
+        ''', (item_id,))
+        return cursor.fetchone()
+
+    def add_miniapp_menu_item(self, name, description, price, category, icon='🍽️', badge=None, old_price=None):
+        """Добавить товар в меню MiniApp"""
+        cursor = self.conn.cursor()
+        
+        # Получаем максимальную позицию для категории
+        cursor.execute('''
+            SELECT MAX(position) FROM miniapp_menu WHERE category = ?
         ''', (category,))
-        return cursor.fetchall()
+        result = cursor.fetchone()
+        position = (result[0] or 0) + 1
+        
+        try:
+            cursor.execute('''
+                INSERT INTO miniapp_menu (name, description, price, old_price, category, icon, badge, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (name, description, price, old_price, category, icon, badge, position))
+            self.conn.commit()
+            return True, "✅ Товар добавлен в меню MiniApp"
+        except Exception as e:
+            return False, f"❌ Ошибка: {str(e)}"
 
-    def get_all_menu_items(self):
-        """Получить все позиции меню"""
+    def update_miniapp_menu_item(self, item_id, **kwargs):
+        """Обновить товар в меню MiniApp"""
+        cursor = self.conn.cursor()
+        
+        fields = []
+        values = []
+        
+        for key, value in kwargs.items():
+            if value is not None:
+                fields.append(f"{key} = ?")
+                values.append(value)
+        
+        if not fields:
+            return False, "❌ Нет данных для обновления"
+        
+        values.append(item_id)
+        query = f"UPDATE miniapp_menu SET {', '.join(fields)} WHERE id = ?"
+        
+        try:
+            cursor.execute(query, values)
+            self.conn.commit()
+            return True, "✅ Товар обновлен"
+        except Exception as e:
+            return False, f"❌ Ошибка: {str(e)}"
+
+    def toggle_miniapp_menu_item(self, item_id, is_active):
+        """Включить/выключить товар в меню MiniApp"""
+        cursor = self.conn.cursor()
+        
+        try:
+            cursor.execute('UPDATE miniapp_menu SET is_active = ? WHERE id = ?', (is_active, item_id))
+            self.conn.commit()
+            status = "включен" if is_active else "выключен"
+            return True, f"✅ Товар {status}"
+        except Exception as e:
+            return False, f"❌ Ошибка: {str(e)}"
+
+    def get_miniapp_config(self, section=None, key=None):
+        """Получить конфигурацию MiniApp"""
+        cursor = self.conn.cursor()
+        
+        if section and key:
+            cursor.execute('SELECT value FROM miniapp_config WHERE section = ? AND key = ?', (section, key))
+            result = cursor.fetchone()
+            return result[0] if result else None
+        elif section:
+            cursor.execute('SELECT key, value FROM miniapp_config WHERE section = ?', (section,))
+            return dict(cursor.fetchall())
+        else:
+            cursor.execute('SELECT section, key, value, description FROM miniapp_config')
+            return cursor.fetchall()
+
+    def set_miniapp_config(self, section, key, value, description=None):
+        """Установить значение конфигурации MiniApp"""
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT id, name, price, category, is_active 
-            FROM menu_items 
-            ORDER BY category, name
+            INSERT OR REPLACE INTO miniapp_config (section, key, value, description, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ''', (section, key, value, description))
+        self.conn.commit()
+
+    def get_miniapp_gallery(self):
+        """Получить галерею для MiniApp"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, title, emoji, description 
+            FROM miniapp_gallery 
+            WHERE is_active = TRUE 
+            ORDER BY position
         ''')
         return cursor.fetchall()
 
-    def get_menu_item_by_id(self, item_id):
-        """Получить позицию меню по ID"""
+    def add_miniapp_gallery_item(self, title, emoji, description):
+        """Добавить элемент в галерею MiniApp"""
         cursor = self.conn.cursor()
-        cursor.execute('SELECT id, name, price, category, is_active FROM menu_items WHERE id = ?', (item_id,))
-        return cursor.fetchone()
-
-    def get_menu_item_by_name(self, name):
-        """Получить позицию меню по названию"""
-        cursor = self.conn.cursor()
-        cursor.execute('SELECT id, name, price, category, is_active FROM menu_items WHERE name = ?', (name,))
-        return cursor.fetchone()
-
-    def add_menu_item(self, name, price, category):
-        """Добавить новую позицию в меню"""
-        cursor = self.conn.cursor()
+        
+        # Получаем максимальную позицию
+        cursor.execute('SELECT MAX(position) FROM miniapp_gallery')
+        result = cursor.fetchone()
+        position = (result[0] or 0) + 1
+        
         try:
-            cursor.execute(
-                'INSERT INTO menu_items (name, price, category, is_active) VALUES (?, ?, ?, ?)',
-                (name, price, category, True)
-            )
+            cursor.execute('''
+                INSERT INTO miniapp_gallery (title, emoji, description, position)
+                VALUES (?, ?, ?, ?)
+            ''', (title, emoji, description, position))
             self.conn.commit()
-            return True, "✅ Позиция успешно добавлена"
-        except sqlite3.IntegrityError:
-            return False, "❌ Позиция с таким названием уже существует"
+            return True, "✅ Элемент добавлен в галерею"
         except Exception as e:
-            return False, f"❌ Ошибка при добавлении: {str(e)}"
+            return False, f"❌ Ошибка: {str(e)}"
 
-    def update_menu_item(self, item_id, name, price, category):
-        """Обновить позицию меню"""
-        cursor = self.conn.cursor()
-        try:
-            # Проверяем, не существует ли другой позиции с таким же названием
-            cursor.execute('SELECT id FROM menu_items WHERE name = ? AND id != ?', (name, item_id))
-            if cursor.fetchone():
-                return False, "❌ Позиция с таким названием уже существует"
-
-            cursor.execute(
-                'UPDATE menu_items SET name = ?, price = ?, category = ? WHERE id = ?',
-                (name, price, category, item_id)
-            )
-            self.conn.commit()
-            return True, "✅ Позиция успешно обновлена"
-        except Exception as e:
-            return False, f"❌ Ошибка при обновлении: {str(e)}"
-
-    def delete_menu_item(self, item_id):
-        """Удалить позицию меню (мягкое удаление - установка is_active = FALSE)"""
-        cursor = self.conn.cursor()
-        try:
-            cursor.execute('UPDATE menu_items SET is_active = FALSE WHERE id = ?', (item_id,))
-            self.conn.commit()
-            return True, "✅ Позиция успешно удалена"
-        except Exception as e:
-            return False, f"❌ Ошибка при удалении: {str(e)}"
-
-    def restore_menu_item(self, item_id):
-        """Восстановить позицию меню"""
-        cursor = self.conn.cursor()
-        try:
-            cursor.execute('UPDATE menu_items SET is_active = TRUE WHERE id = ?', (item_id,))
-            self.conn.commit()
-            return True, "✅ Позиция успешно восстановлена"
-        except Exception as e:
-            return False, f"❌ Ошибка при восстановлении: {str(e)}"
-
-    def get_inactive_menu_items(self):
-        """Получить неактивные позиции меню"""
+    def get_user_by_telegram_id(self, telegram_id):
+        """Получить пользователя по Telegram ID для MiniApp"""
         cursor = self.conn.cursor()
         cursor.execute('''
-            SELECT id, name, price, category, is_active 
-            FROM menu_items 
-            WHERE is_active = FALSE 
-            ORDER BY category, name
-        ''')
+            SELECT id, telegram_id, first_name, last_name, phone, bonus_balance, registration_date, total_spent, total_orders
+            FROM users 
+            WHERE telegram_id = ?
+        ''', (telegram_id,))
+        return cursor.fetchone()
+
+    def create_miniapp_booking(self, user_id, name, phone, date, time, guests, comment="", source="miniapp"):
+        """Создать бронирование из MiniApp"""
+        cursor = self.conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT INTO bookings (user_id, booking_date, booking_time, guests, comment, status, created_at, source, customer_name, customer_phone)
+                VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?)
+            ''', (user_id, date, time, guests, comment, source, name, phone))
+            
+            booking_id = cursor.lastrowid
+            self.conn.commit()
+            
+            return booking_id
+        except Exception as e:
+            logger.error(f"Ошибка создания бронирования из MiniApp: {e}")
+            return None
+
+    def get_miniapp_user_bookings(self, user_id):
+        """Получить бронирования пользователя для MiniApp"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, booking_date, booking_time, guests, comment, status, created_at
+            FROM bookings 
+            WHERE user_id = ? AND source = 'miniapp'
+            ORDER BY booking_date DESC, booking_time DESC
+            LIMIT 10
+        ''', (user_id,))
         return cursor.fetchall()
+
+    def get_or_create_miniapp_user(self, telegram_user):
+        """Получить или создать пользователя для MiniApp"""
+        cursor = self.conn.cursor()
+        
+        # Проверяем существование пользователя
+        cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (telegram_user.get('id'),))
+        user = cursor.fetchone()
+        
+        if user:
+            return user[0]
+        
+        # Создаем нового пользователя
+        try:
+            cursor.execute('''
+                INSERT INTO users (telegram_id, first_name, last_name, registration_date, bonus_balance)
+                VALUES (?, ?, ?, datetime('now'), 0)
+            ''', (
+                telegram_user.get('id'),
+                telegram_user.get('first_name', ''),
+                telegram_user.get('last_name', '')
+            ))
+            user_id = cursor.lastrowid
+            self.conn.commit()
+            return user_id
+        except Exception as e:
+            logger.error(f"Ошибка создания пользователя: {e}")
+            return None
+
+    # ========== СУЩЕСТВУЮЩИЕ МЕТОДЫ (сохраняем все из вашего файла) ==========
 
     def add_user(self, telegram_id, first_name, last_name, phone, referred_by=None):
         try:
@@ -492,7 +702,6 @@ class Database:
             ''', (telegram_id, first_name, last_name, phone, 100, referred_by, registration_date))
             user_id = cursor.lastrowid
 
-            # Если пользователь зарегистрирован по реферальной ссылке, создаем запись
             if referred_by:
                 cursor.execute('''
                     INSERT INTO referrals (referrer_id, referred_id, created_at)
@@ -527,12 +736,12 @@ class Database:
         ''', (user_id, amount, transaction_type, description, self.get_moscow_time()))
         self.conn.commit()
 
-    def create_booking(self, user_id, date, time, guests):
+    def create_booking(self, user_id, date, time, guests, comment='', source='bot', customer_name='', customer_phone=''):
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO bookings (user_id, booking_date, booking_time, guests, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, date, time, guests, self.get_moscow_time()))
+            INSERT INTO bookings (user_id, booking_date, booking_time, guests, comment, created_at, source, customer_name, customer_phone)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, date, time, guests, comment, self.get_moscow_time(), source, customer_name, customer_phone))
         self.conn.commit()
         return cursor.lastrowid
 
@@ -572,7 +781,6 @@ class Database:
         return cursor.fetchall()
 
     def get_referrer_stats(self, user_id):
-        """Получить статистику по рефералам"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT COUNT(*) as total_referrals, 
@@ -584,17 +792,14 @@ class Database:
         return result if result else (0, 0)
 
     def award_referral_bonus(self, referred_user_id):
-        """Начислить бонус рефереру за приглашенного пользователя"""
         cursor = self.conn.cursor()
 
-        # Находим реферера
         cursor.execute('SELECT referred_by FROM users WHERE id = ?', (referred_user_id,))
         result = cursor.fetchone()
 
         if result and result[0]:
             referrer_id = result[0]
 
-            # Проверяем, не был ли уже начислен бонус
             cursor.execute('''
                 SELECT bonus_awarded FROM referrals 
                 WHERE referred_id = ? AND referrer_id = ?
@@ -603,13 +808,11 @@ class Database:
             referral = cursor.fetchone()
 
             if referral and not referral[0]:
-                # Начисляем бонус рефереру
                 from config import REFERRAL_BONUS
                 self.update_user_balance(referrer_id, REFERRAL_BONUS)
                 self.add_transaction(referrer_id, REFERRAL_BONUS, 'earn',
                                      f'Реферальный бонус за приглашенного пользователя')
 
-                # Отмечаем бонус как начисленный
                 cursor.execute('''
                     UPDATE referrals SET bonus_awarded = 1 
                     WHERE referred_id = ? AND referrer_id = ?
@@ -621,7 +824,6 @@ class Database:
         return None, 0
 
     def get_bookings_by_status(self, status):
-        """Получить бронирования по статусу"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
@@ -633,7 +835,6 @@ class Database:
         return cursor.fetchall()
 
     def get_bookings_by_date(self, date):
-        """Получить бронирования по дате"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
@@ -645,7 +846,6 @@ class Database:
         return cursor.fetchall()
 
     def get_all_bookings_sorted(self):
-        """Получить все бронирования с сортировкой по дате и времени"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
@@ -656,7 +856,6 @@ class Database:
         return cursor.fetchall()
 
     def get_booking_stats(self):
-        """Получить статистику по бронированиям"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT 
@@ -667,7 +866,6 @@ class Database:
         ''')
         stats = cursor.fetchall()
 
-        # Преобразуем в словарь для удобства
         stats_dict = {}
         total = 0
         for status, count in stats:
@@ -678,7 +876,6 @@ class Database:
         return stats_dict
 
     def get_booking_dates(self):
-        """Получить список уникальных дат, на которые есть бронирования"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT DISTINCT booking_date 
@@ -689,13 +886,11 @@ class Database:
         return [date[0] for date in dates] if dates else []
 
     def get_order_by_id(self, order_id):
-        """Получить заказ по ID"""
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM orders WHERE id = ?', (order_id,))
         return cursor.fetchone()
 
     def get_active_orders(self):
-        """Получить все активные заказы с информацией об администраторе"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT o.*, u.first_name, u.last_name 
@@ -707,7 +902,6 @@ class Database:
         return cursor.fetchall()
 
     def get_active_order_by_table(self, table_number):
-        """Получить активный заказ по номеру стола"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM orders 
@@ -717,7 +911,6 @@ class Database:
         return cursor.fetchone()
 
     def get_orders_by_date(self, date, status=None):
-        """Получить заказы по дате с полной информацией"""
         cursor = self.conn.cursor()
         if status:
             cursor.execute('''
@@ -738,7 +931,6 @@ class Database:
         return cursor.fetchall()
 
     def get_all_closed_orders(self):
-        """Получить все закрытые заказы с информацией об администраторе"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT o.*, u.first_name, u.last_name 
@@ -750,7 +942,6 @@ class Database:
         return cursor.fetchall()
 
     def get_order_dates(self):
-        """Получить список уникальных дат, на которые есть заказы"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT DISTINCT DATE(created_at) as order_date 
@@ -761,12 +952,9 @@ class Database:
         dates = cursor.fetchall()
         return [date[0] for date in dates] if dates else []
 
-    # НОВЫЙ МЕТОД ДЛЯ УДАЛЕНИЯ ПОЗИЦИЙ ИЗ ЗАКАЗА
     def remove_item_from_order(self, order_id, item_name):
-        """Удалить позицию из заказа"""
         cursor = self.conn.cursor()
 
-        # Сначала получаем информацию о позиции
         cursor.execute('''
             SELECT id, quantity FROM order_items 
             WHERE order_id = ? AND item_name = ?
@@ -780,7 +968,6 @@ class Database:
         item_id, current_quantity = item
 
         if current_quantity > 1:
-            # Уменьшаем количество
             cursor.execute('''
                 UPDATE order_items 
                 SET quantity = quantity - 1 
@@ -788,7 +975,6 @@ class Database:
             ''', (item_id,))
             message = "Количество уменьшено"
         else:
-            # Удаляем позицию полностью
             cursor.execute('''
                 DELETE FROM order_items 
                 WHERE id = ?
@@ -798,12 +984,9 @@ class Database:
         self.conn.commit()
         return True, message
 
-    # НОВЫЙ МЕТОД ДЛЯ ПОЛУЧЕНИЯ ЗАКАЗОВ ЗА СМЕНУ
     def get_orders_by_shift_id(self, shift_id):
-        """Получить все заказы конкретной смены"""
         cursor = self.conn.cursor()
 
-        # Получаем информацию о смене
         cursor.execute('SELECT opened_at, closed_at FROM shifts WHERE id = ?', (shift_id,))
         shift_info = cursor.fetchone()
 
@@ -812,7 +995,6 @@ class Database:
 
         opened_at, closed_at = shift_info
 
-        # Если смена закрыта, ищем заказы между opened_at и closed_at
         if closed_at:
             cursor.execute('''
                 SELECT * FROM orders 
@@ -820,7 +1002,6 @@ class Database:
                 ORDER BY created_at DESC
             ''', (opened_at, closed_at))
         else:
-            # Если смена еще открыта, ищем заказы начиная с opened_at
             cursor.execute('''
                 SELECT * FROM orders 
                 WHERE created_at >= ?
@@ -829,9 +1010,7 @@ class Database:
 
         return cursor.fetchall()
 
-    # МЕТОДЫ ДЛЯ УПРАВЛЕНИЯ СМЕНАМИ - ИСПРАВЛЕННЫЕ
     def get_next_shift_number(self, month_year=None):
-        """Получить следующий номер смены для указанного месяца"""
         cursor = self.conn.cursor()
 
         if not month_year:
@@ -846,7 +1025,6 @@ class Database:
         return (result[0] or 0) + 1
 
     def create_shift(self, admin_id, month_year=None):
-        """Создать новую смену - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
 
         if not month_year:
@@ -862,9 +1040,7 @@ class Database:
             self.conn.commit()
             return shift_number
         except sqlite3.IntegrityError as e:
-            # Если возникает ошибка уникальности, пробуем снова с увеличенным номером
             print(f"⚠️ Ошибка уникальности: {e}. Пробуем найти максимальный номер...")
-            # Ищем максимальный номер смены для этого месяца
             cursor.execute(''' 
                 SELECT shift_number FROM shifts 
                 WHERE month_year = ?
@@ -888,7 +1064,6 @@ class Database:
                 return shift_number
             except sqlite3.IntegrityError as e2:
                 print(f"❌ Вторая ошибка уникальности: {e2}")
-                # Если и это не сработало, ищем свободный номер
                 cursor.execute('''
                     SELECT shift_number FROM shifts 
                     WHERE month_year = ?
@@ -897,8 +1072,7 @@ class Database:
                 existing_shifts = cursor.fetchall()
                 existing_numbers = [s[0] for s in existing_shifts]
 
-                # Находим первый свободный номер
-                for i in range(1, 1000):  # Максимум 1000 смен в месяце
+                for i in range(1, 1000):
                     if i not in existing_numbers:
                         shift_number = i
                         break
@@ -911,7 +1085,6 @@ class Database:
                 return shift_number
 
     def get_active_shift(self):
-        """Получить активную смену"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM shifts 
@@ -922,7 +1095,6 @@ class Database:
         return cursor.fetchone()
 
     def get_shift_by_number_and_month(self, shift_number, month_year):
-        """Получить смену по номеру и месяцу"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM shifts 
@@ -931,14 +1103,12 @@ class Database:
         return cursor.fetchone()
 
     def get_shift_by_number(self, shift_number, month_year=None):
-        """Получить информацию о смене по номеру"""
         cursor = self.conn.cursor()
 
         if month_year:
             cursor.execute('SELECT * FROM shifts WHERE shift_number = ? AND month_year = ?',
                            (shift_number, month_year))
         else:
-            # Если месяц не указан, ищем последнюю смену с таким номером
             cursor.execute('''
                 SELECT * FROM shifts 
                 WHERE shift_number = ? 
@@ -949,7 +1119,6 @@ class Database:
         return cursor.fetchone()
 
     def close_shift(self, shift_number, month_year, total_revenue, total_orders):
-        """Закрыть смену в базе данных - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         cursor.execute('''
             UPDATE shifts 
@@ -959,10 +1128,8 @@ class Database:
         self.conn.commit()
 
     def save_shift_sales(self, shift_number, month_year, sales_data):
-        """Сохранить статистику продаж по смене - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
 
-        # Находим ID смены
         cursor.execute('SELECT id FROM shifts WHERE shift_number = ? AND month_year = ?',
                        (shift_number, month_year))
         shift = cursor.fetchone()
@@ -973,10 +1140,8 @@ class Database:
 
         shift_id = shift[0]
 
-        # Удаляем старые данные если есть
         cursor.execute('DELETE FROM shift_sales WHERE shift_id = ?', (shift_id,))
 
-        # Сохраняем новые данные
         for item_name, data in sales_data.items():
             cursor.execute('''
                 INSERT INTO shift_sales (shift_id, item_name, quantity, total_amount)
@@ -986,10 +1151,8 @@ class Database:
         self.conn.commit()
 
     def get_shift_sales(self, shift_number, month_year):
-        """Получить статистику продаж по смене - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
 
-        # Сначала находим ID смены по номеру и месяцу
         shift = self.get_shift_by_number_and_month(shift_number, month_year)
         if not shift:
             return []
@@ -1006,7 +1169,6 @@ class Database:
         return cursor.fetchall()
 
     def get_shift_years(self):
-        """Получить список годов, в которых есть смены - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT DISTINCT substr(month_year, 1, 4) as year 
@@ -1018,7 +1180,6 @@ class Database:
         return [year[0] for year in years] if years else []
 
     def get_shift_months(self, year):
-        """Получить список месяцев для указанного года - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT DISTINCT substr(month_year, 6, 2) as month 
@@ -1030,7 +1191,6 @@ class Database:
         return [month[0] for month in months] if months else []
 
     def get_shifts_by_year_month(self, year, month):
-        """Получить список смен для указанного года и месяца - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         month_year = f"{year}-{month:02d}" if isinstance(month, int) else f"{year}-{month}"
 
@@ -1042,7 +1202,6 @@ class Database:
         return cursor.fetchall()
 
     def get_all_shifts_sorted(self):
-        """Получить все смены с сортировкой по дате"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM shifts 
@@ -1052,7 +1211,6 @@ class Database:
         return cursor.fetchall()
 
     def get_shifts_by_period(self, period='all'):
-        """Получить смены за период"""
         cursor = self.conn.cursor()
 
         if period == 'month':
@@ -1078,7 +1236,6 @@ class Database:
         return cursor.fetchall()
 
     def get_sales_statistics_by_period(self, period):
-        """Получить статистику продаж за период"""
         cursor = self.conn.cursor()
 
         if period == 'month':
@@ -1113,7 +1270,6 @@ class Database:
         return cursor.fetchall()
 
     def get_total_revenue_by_period(self, period):
-        """Получить общую выручку за период"""
         cursor = self.conn.cursor()
 
         if period == 'month':
@@ -1134,9 +1290,7 @@ class Database:
         result = cursor.fetchone()
         return result[0] or 0
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ СТАТИСТИКИ ПО ГОДАМ И МЕСЯЦАМ
     def get_sales_statistics_by_year(self, year):
-        """Получить статистику продаж за указанный год - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT ss.item_name, SUM(ss.quantity) as total_quantity, SUM(ss.total_amount) as total_amount
@@ -1149,7 +1303,6 @@ class Database:
         return cursor.fetchall()
 
     def get_total_revenue_by_year(self, year):
-        """Получить общую выручку за указанный год - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT SUM(total_revenue) FROM shifts 
@@ -1159,7 +1312,6 @@ class Database:
         return result[0] or 0
 
     def get_sales_statistics_by_year_month(self, year, month):
-        """Получить статистику продаж за указанный год и месяц - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         month_year = f"{year}-{month:02d}" if isinstance(month, int) else f"{year}-{month}"
 
@@ -1174,7 +1326,6 @@ class Database:
         return cursor.fetchall()
 
     def get_total_revenue_by_year_month(self, year, month):
-        """Получить общую выручку за указанный год и месяц - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         cursor = self.conn.cursor()
         month_year = f"{year}-{month:02d}" if isinstance(month, int) else f"{year}-{month}"
 
@@ -1186,7 +1337,6 @@ class Database:
         return result[0] or 0
 
     def get_all_shifts(self):
-        """Получить все смены с сортировкой по дате открытия"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM shifts 
@@ -1195,7 +1345,6 @@ class Database:
         return cursor.fetchall()
 
     def get_shifts_by_month(self, month_year):
-        """Получить смены за указанный месяц"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT * FROM shifts 
@@ -1204,9 +1353,7 @@ class Database:
         ''', (month_year,))
         return cursor.fetchall()
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ ОТЛАДКИ
     def get_all_shifts_debug(self):
-        """Для отладки - получить все смены с деталями"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT id, shift_number, month_year, opened_at, closed_at, 
@@ -1217,15 +1364,11 @@ class Database:
         return cursor.fetchall()
 
     def get_current_month_year(self):
-        """Получить текущий месяц и год"""
         return datetime.now().strftime('%Y-%m')
 
-    # НОВЫЕ МЕТОДЫ ДЛЯ ПОДСЧЕТА СПИСАННЫХ БОНУСОВ
     def get_spent_bonuses_by_shift(self, shift_number, month_year):
-        """Получить сумму списанных бонусов за смену"""
         cursor = self.conn.cursor()
 
-        # Находим ID смены
         shift = self.get_shift_by_number_and_month(shift_number, month_year)
         if not shift:
             return 0
@@ -1252,10 +1395,8 @@ class Database:
         return result[0] or 0
 
     def get_spent_bonuses_by_month(self, year, month):
-        """Получить сумму списанных бонусов за месяц"""
         cursor = self.conn.cursor()
 
-        # Формируем строку месяца: YYYY-MM
         if isinstance(month, int):
             month_str = f"{year}-{month:02d}"
         else:
@@ -1272,7 +1413,6 @@ class Database:
         return result[0] or 0
 
     def get_spent_bonuses_by_year(self, year):
-        """Получить сумму списанных бонусов за год"""
         cursor = self.conn.cursor()
         cursor.execute('''
             SELECT SUM(amount) 
@@ -1285,7 +1425,6 @@ class Database:
         return result[0] or 0
 
     def get_spent_bonuses_by_period(self, period):
-        """Получить сумму списанных бонусов за период (month/year)"""
         cursor = self.conn.cursor()
 
         if period == 'month':
@@ -1310,10 +1449,7 @@ class Database:
         result = cursor.fetchone()
         return result[0] or 0
 
-    # ========== ДОБАВЬТЕ ЭТИ 2 НОВЫХ МЕТОДА ЗДЕСЬ ==========
-
     def get_payment_statistics_by_month(self, year, month):
-        """Получить статистику по оплате за месяц"""
         cursor = self.conn.cursor()
         month_year = f"{year}-{month:02d}" if isinstance(month, int) else f"{year}-{month}"
 
@@ -1339,7 +1475,6 @@ class Database:
         return stats
 
     def get_payment_statistics_by_year(self, year):
-        """Получить статистику по оплате за год"""
         cursor = self.conn.cursor()
 
         cursor.execute('''
@@ -1363,25 +1498,18 @@ class Database:
 
         return stats
 
-    # ========== ДОБАВЬТЕ ЭТИ МЕТОДЫ ЗДЕСЬ ==========
-
     def add_payment_method_column(self):
-        """Добавить колонку payment_method в таблицу orders если её нет"""
         cursor = self.conn.cursor()
         cursor.execute("PRAGMA table_info(orders)")
         columns = [column[1] for column in cursor.fetchall()]
 
         if 'payment_method' not in columns:
-            print("🔄 Добавляем колонку payment_method в таблицу orders...")
             cursor.execute('ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT NULL')
             self.conn.commit()
-            print("✅ Колонка payment_method добавлена")
             return True
-        print("✅ Колонка payment_method уже существует")
         return False
 
     def update_order_payment_method(self, order_id, payment_method):
-        """Обновить метод оплаты для заказа"""
         cursor = self.conn.cursor()
         cursor.execute('''
             UPDATE orders SET payment_method = ? WHERE id = ?
@@ -1389,10 +1517,8 @@ class Database:
         self.conn.commit()
 
     def get_payment_statistics_by_shift(self, shift_number, month_year):
-        """Получить статистику по оплате за смену"""
         cursor = self.conn.cursor()
 
-        # Находим ID смены
         shift = self.get_shift_by_number_and_month(shift_number, month_year)
         if not shift:
             return {}
@@ -1438,7 +1564,6 @@ class Database:
         return stats
 
     def get_payment_statistics_by_period(self, period):
-        """Получить статистику по оплате за период"""
         cursor = self.conn.cursor()
 
         if period == 'month':
@@ -1493,3 +1618,98 @@ class Database:
             stats[payment_method] = {'count': count, 'total_amount': total_amount or 0}
 
         return stats
+
+    # ========== МЕТОДЫ ДЛЯ УПРАВЛЕНИЯ МЕНЮ ==========
+
+    def get_all_menu_categories(self):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT DISTINCT category FROM menu_items WHERE is_active = TRUE ORDER BY category')
+        categories = cursor.fetchall()
+        return [category[0] for category in categories] if categories else []
+
+    def get_menu_items_by_category(self, category):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, name, price, category, is_active 
+            FROM menu_items 
+            WHERE category = ? AND is_active = TRUE 
+            ORDER BY name
+        ''', (category,))
+        return cursor.fetchall()
+
+    def get_all_menu_items(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, name, price, category, is_active 
+            FROM menu_items 
+            ORDER BY category, name
+        ''')
+        return cursor.fetchall()
+
+    def get_menu_item_by_id(self, item_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id, name, price, category, is_active FROM menu_items WHERE id = ?', (item_id,))
+        return cursor.fetchone()
+
+    def get_menu_item_by_name(self, name):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT id, name, price, category, is_active FROM menu_items WHERE name = ?', (name,))
+        return cursor.fetchone()
+
+    def add_menu_item(self, name, price, category):
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(
+                'INSERT INTO menu_items (name, price, category, is_active) VALUES (?, ?, ?, ?)',
+                (name, price, category, True)
+            )
+            self.conn.commit()
+            return True, "✅ Позиция успешно добавлена"
+        except sqlite3.IntegrityError:
+            return False, "❌ Позиция с таким названием уже существует"
+        except Exception as e:
+            return False, f"❌ Ошибка при добавлении: {str(e)}"
+
+    def update_menu_item(self, item_id, name, price, category):
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute('SELECT id FROM menu_items WHERE name = ? AND id != ?', (name, item_id))
+            if cursor.fetchone():
+                return False, "❌ Позиция с таким названием уже существует"
+
+            cursor.execute(
+                'UPDATE menu_items SET name = ?, price = ?, category = ? WHERE id = ?',
+                (name, price, category, item_id)
+            )
+            self.conn.commit()
+            return True, "✅ Позиция успешно обновлена"
+        except Exception as e:
+            return False, f"❌ Ошибка при обновлении: {str(e)}"
+
+    def delete_menu_item(self, item_id):
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute('UPDATE menu_items SET is_active = FALSE WHERE id = ?', (item_id,))
+            self.conn.commit()
+            return True, "✅ Позиция успешно удалена"
+        except Exception as e:
+            return False, f"❌ Ошибка при удалении: {str(e)}"
+
+    def restore_menu_item(self, item_id):
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute('UPDATE menu_items SET is_active = TRUE WHERE id = ?', (item_id,))
+            self.conn.commit()
+            return True, "✅ Позиция успешно восстановлена"
+        except Exception as e:
+            return False, f"❌ Ошибка при восстановлении: {str(e)}"
+
+    def get_inactive_menu_items(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, name, price, category, is_active 
+            FROM menu_items 
+            WHERE is_active = FALSE 
+            ORDER BY category, name
+        ''')
+        return cursor.fetchall()
