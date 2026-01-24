@@ -43,10 +43,11 @@ if not STATIC_DIR.exists():
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("📁 Создана папка 'static' для MiniApp")
 
-# Создаем файл index.html с новым кодом MiniApp
+# Создаем базовый index.html, если его нет
 INDEX_FILE = STATIC_DIR / "index.html"
-with open(INDEX_FILE, "w", encoding="utf-8") as f:
-    f.write("""<!DOCTYPE html>
+if not INDEX_FILE.exists():
+    with open(INDEX_FILE, "w", encoding="utf-8") as f:
+        f.write("""<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -1180,7 +1181,7 @@ with open(INDEX_FILE, "w", encoding="utf-8") as f:
     </script>
 </body>
 </html>""")
-logger.info("📄 Создан новый index.html с расширенным функционалом")
+    logger.info("📄 Создан index.html в папке static. Вставьте ваш HTML код")
 
 # Создаем FastAPI приложение для MiniApp
 web_app = FastAPI(title="Vovsetyagskie MiniApp")
@@ -1203,221 +1204,10 @@ async def serve_miniapp():
     """Основной маршрут для MiniApp"""
     return FileResponse("static/index.html")
 
-# API для получения данных пользователя
-@web_app.get("/api/user/{user_id}")
-async def get_user_data(user_id: int):
-    """Получение данных пользователя"""
-    try:
-        from database import Database
-        db = Database()
-        user = db.get_user(user_id)
-        
-        if user:
-            return JSONResponse({
-                "status": "success",
-                "data": {
-                    "id": user[0],
-                    "user_id": user[1],
-                    "username": user[2],
-                    "first_name": user[3],
-                    "phone": user[4],
-                    "balance": user[7],
-                    "total_spent": user[8]
-                }
-            })
-        else:
-            return JSONResponse({
-                "status": "error",
-                "message": "User not found"
-            }, status_code=404)
-    except Exception as e:
-        logger.error(f"Ошибка получения данных пользователя: {e}")
-        return JSONResponse({
-            "status": "error",
-            "message": str(e)
-        }, status_code=500)
-
-# API для создания бронирования
-@web_app.post("/api/booking")
-async def create_booking(request: Request):
-    """Создание бронирования через API"""
-    try:
-        data = await request.json()
-        
-        # Валидация данных
-        required_fields = ["user_id", "name", "phone", "date", "time", "guests"]
-        for field in required_fields:
-            if field not in data:
-                return JSONResponse({
-                    "status": "error",
-                    "message": f"Missing required field: {field}"
-                }, status_code=400)
-        
-        from database import Database
-        db = Database()
-        
-        # Преобразуем количество гостей
-        guests_str = data["guests"]
-        if "-" in guests_str:
-            guests_num = int(guests_str.split("-")[-1].replace("+", "").strip())
-        elif "+" in guests_str:
-            guests_num = int(guests_str.replace("+", "").strip())
-        else:
-            guests_num = int(guests_str)
-        
-        # Создаем бронирование
-        booking_id = db.create_booking(
-            user_id=data["user_id"],
-            booking_date=data["date"],
-            booking_time=data["time"],
-            guests=guests_num,
-            comment=data.get("comment", ""),
-            status="pending"
-        )
-        
-        if booking_id:
-            # Уведомляем администраторов
-            from config import ADMIN_IDS
-            try:
-                # Импортируем здесь, чтобы избежать циклических импортов
-                import asyncio
-                from telegram import Bot
-                
-                bot = Bot(token=BOT_TOKEN)
-                for admin_id in ADMIN_IDS:
-                    try:
-                        await bot.send_message(
-                            chat_id=admin_id,
-                            text=f"🆕 Новая бронь из MiniApp!\n"
-                                 f"👤 Пользователь: {data['name']}\n"
-                                 f"📞 Телефон: {data['phone']}\n"
-                                 f"📅 Дата: {data['date']}\n"
-                                 f"⏰ Время: {data['time']}\n"
-                                 f"👥 Гостей: {guests_num}\n"
-                                 f"💬 Комментарий: {data.get('comment', 'Нет')}"
-                        )
-                    except Exception as e:
-                        logger.error(f"Ошибка уведомления админа {admin_id}: {e}")
-            except Exception as e:
-                logger.error(f"Ошибка отправки уведомлений: {e}")
-            
-            return JSONResponse({
-                "status": "success",
-                "booking_id": booking_id,
-                "message": "Бронирование создано успешно"
-            })
-        else:
-            return JSONResponse({
-                "status": "error",
-                "message": "Ошибка создания бронирования"
-            }, status_code=500)
-            
-    except Exception as e:
-        logger.error(f"Ошибка создания бронирования: {e}")
-        return JSONResponse({
-            "status": "error",
-            "message": str(e)
-        }, status_code=500)
-
-# API для получения меню
-@web_app.get("/api/menu")
-async def get_menu():
-    """Получение меню"""
-    try:
-        from database import Database
-        db = Database()
-        menu_items = db.get_all_menu_items()
-        
-        formatted_items = []
-        for item in menu_items:
-            formatted_items.append({
-                "id": item[0],
-                "name": item[1],
-                "description": item[2] or "",
-                "price": item[3],
-                "category": item[4] or "other",
-                "image_url": item[5] or "",
-                "is_available": bool(item[6]) if item[6] is not None else True
-            })
-        
-        return JSONResponse({
-            "status": "success",
-            "data": formatted_items
-        })
-    except Exception as e:
-        logger.error(f"Ошибка получения меню: {e}")
-        return JSONResponse({
-            "status": "error",
-            "message": str(e)
-        }, status_code=500)
-
-# API для получения бронирований пользователя
-@web_app.get("/api/user/{user_id}/bookings")
-async def get_user_bookings(user_id: int):
-    """Получение бронирований пользователя"""
-    try:
-        from database import Database
-        db = Database()
-        bookings = db.get_user_bookings(user_id)
-        
-        formatted_bookings = []
-        for booking in bookings:
-            formatted_bookings.append({
-                "id": booking[0],
-                "date": booking[2],
-                "time": booking[3],
-                "guests": booking[4],
-                "comment": booking[5] or "",
-                "status": booking[6],
-                "created_at": booking[7]
-            })
-        
-        return JSONResponse({
-            "status": "success",
-            "data": formatted_bookings
-        })
-    except Exception as e:
-        logger.error(f"Ошибка получения бронирований: {e}")
-        return JSONResponse({
-            "status": "error",
-            "message": str(e)
-        }, status_code=500)
-
 # Маршрут для проверки здоровья
 @web_app.get("/health")
 async def health_check():
     return JSONResponse({"status": "ok", "service": "miniapp", "port": 3000})
-
-# Маршрут для favicon
-@web_app.get("/favicon.ico")
-async def favicon():
-    favicon_path = Path("static/favicon.ico")
-    if favicon_path.exists():
-        return FileResponse("static/favicon.ico")
-    return JSONResponse({"status": "favicon not found"})
-
-# Маршрут для данных о заведении
-@web_app.get("/api/restaurant-info")
-async def restaurant_info():
-    """Информация о ресторане"""
-    return JSONResponse({
-        "status": "success",
-        "data": {
-            "name": "Во Все Тяжкие | Premium Hookah",
-            "address": "ул. Химическая, 52",
-            "phone": "+7 (999) 123-45-67",
-            "instagram": "@vovseTyajkie",
-            "working_hours": {
-                "weekdays": "14:00 — 02:00",
-                "weekends": "14:00 — 04:00"
-            },
-            "stats": {
-                "flavors": "50+",
-                "experience": "5",
-                "guests": "10K"
-            }
-        }
-    })
 
 def run_web_server():
     """Запуск веб-сервера в отдельном потоке"""
@@ -1436,7 +1226,88 @@ def run_web_server():
     except Exception as e:
         logger.error(f"❌ Ошибка веб-сервера: {e}")
 
-# Функция для обработки данных из MiniApp
+async def post_init(application):
+    """Функция, выполняемая после инициализации бота"""
+    logger.info("🤖 Бот успешно запущен и готов к работе!")
+
+    # Получаем информацию о боте
+    bot_info = await application.bot.get_me()
+    logger.info(f"🔗 Бот: {bot_info.first_name} (@{bot_info.username})")
+    logger.info(f"🆔 ID бота: {bot_info.id}")
+    
+    # Проверяем настройки MiniApp
+    if MINIAPP_URL:
+        logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
+    else:
+        logger.warning("⚠️ MiniApp URL не настроен в конфигурации")
+
+async def post_stop(application):
+    """Функция, выполняемая при остановке бота"""
+    logger.info("🛑 Бот остановлен")
+
+def is_admin(user_id):
+    """Проверяет, является ли пользователь администратором"""
+    return user_id in ADMIN_IDS
+
+class AdminFilter(filters.MessageFilter):
+    def filter(self, message):
+        return is_admin(message.from_user.id)
+
+class UserFilter(filters.MessageFilter):
+    def filter(self, message):
+        return not is_admin(message.from_user.id)
+
+# Создаем экземпляры фильтров
+admin_filter = AdminFilter()
+user_filter = UserFilter()
+
+# ФУНКЦИЯ: Обработчик для кнопки MiniApp
+async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Открыть MiniApp"""
+    user_id = update.effective_user.id
+    
+    # Проверяем, зарегистрирован ли пользователь
+    from database import Database
+    db = Database()
+    user_data = db.get_user(user_id)
+    
+    if not user_data:
+        await update.message.reply_text(
+            "❌ Сначала зарегистрируйтесь с помощью /start",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Зарегистрироваться", callback_data="start_registration")]
+            ])
+        )
+        return
+    
+    if not MINIAPP_URL:
+        await update.message.reply_text(
+            "❌ MiniApp временно недоступен. Используйте бота для доступа ко всем функциям."
+        )
+        return
+    
+    # Создаем кнопку для открытия MiniApp
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "🌐 Открыть веб-приложение",
+            web_app=WebAppInfo(url=MINIAPP_URL)
+        )
+    ]])
+    
+    await update.message.reply_text(
+        "🌐 **Во Все Тяжкие | Premium Hookah**\n\n"
+        "Откройте веб-приложение для удобного доступа к:\n"
+        "• 💨 Премиум кальянам\n"
+        "• 📅 Бронированию столиков\n"
+        "• 🍽️ Меню с ценами\n"
+        "• 📸 Галерее заведения\n"
+        "• 👤 Вашему профилю\n\n"
+        "Нажмите кнопку ниже, чтобы открыть:",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+
+# ФУНКЦИЯ: Обработчик данных из WebApp
 async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик данных из WebApp"""
     try:
@@ -1551,90 +1422,54 @@ async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"❌ Ошибка обработки данных от MiniApp: {e}", exc_info=True)
 
-# ... остальной код остается без изменений (post_init, post_stop, is_admin, фильтры и т.д.) ...
+# ФУНКЦИЯ ДЛЯ ОТЛАДКИ: показать все смены
+async def debug_shifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда для отладки - показать все смены"""
+    if not is_admin(update.effective_user.id):
+        return
 
-async def post_init(application):
-    """Функция, выполняемая после инициализации бота"""
-    logger.info("🤖 Бот успешно запущен и готов к работе!")
-
-    # Получаем информацию о боте
-    bot_info = await application.bot.get_me()
-    logger.info(f"🔗 Бот: {bot_info.first_name} (@{bot_info.username})")
-    logger.info(f"🆔 ID бота: {bot_info.id}")
-    
-    # Проверяем настройки MiniApp
-    if MINIAPP_URL:
-        logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
-    else:
-        logger.warning("⚠️ MiniApp URL не настроен в конфигурации")
-
-async def post_stop(application):
-    """Функция, выполняемая при остановке бота"""
-    logger.info("🛑 Бот остановлен")
-
-def is_admin(user_id):
-    """Проверяет, является ли пользователь администратором"""
-    return user_id in ADMIN_IDS
-
-class AdminFilter(filters.MessageFilter):
-    def filter(self, message):
-        return is_admin(message.from_user.id)
-
-class UserFilter(filters.MessageFilter):
-    def filter(self, message):
-        return not is_admin(message.from_user.id)
-
-# Создаем экземпляры фильтров
-admin_filter = AdminFilter()
-user_filter = UserFilter()
-
-# ФУНКЦИЯ: Обработчик для кнопки MiniApp
-async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Открыть MiniApp"""
-    user_id = update.effective_user.id
-    
-    # Проверяем, зарегистрирован ли пользователь
     from database import Database
     db = Database()
-    user_data = db.get_user(user_id)
-    
-    if not user_data:
-        await update.message.reply_text(
-            "❌ Сначала зарегистрируйтесь с помощью /start",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🚀 Зарегистрироваться", callback_data="start_registration")]
-            ])
-        )
-        return
-    
-    if not MINIAPP_URL:
-        await update.message.reply_text(
-            "❌ MiniApp временно недоступен. Используйте бота для доступа ко всем функциям."
-        )
-        return
-    
-    # Создаем кнопку для открытия MiniApp
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
-            "🌐 Открыть веб-приложение",
-            web_app=WebAppInfo(url=MINIAPP_URL)
-        )
-    ]])
-    
-    await update.message.reply_text(
-        "🌐 **Во Все Тяжкие | Premium Hookah**\n\n"
-        "Откройте веб-приложение для удобного доступа к:\n"
-        "• 💨 Премиум кальянам\n"
-        "• 📅 Бронированию столиков\n"
-        "• 🍽️ Меню с ценами\n"
-        "• 📸 Галерее заведения\n"
-        "• 👤 Вашему профилю\n\n"
-        "Нажмите кнопку ниже, чтобы открыть:",
-        reply_markup=keyboard,
-        parse_mode='Markdown'
-    )
+    all_shifts = db.get_all_shifts_debug()
 
-# Команда для отладки MiniApp
+    if not all_shifts:
+        await update.message.reply_text("📭 Нет смен в базе данных")
+        return
+
+    message = "📊 ВСЕ СМЕНЫ В БАЗЕ:\n\n"
+    for shift in all_shifts:
+        message += f"Смена #{shift[1]} ({shift[2]})\n"
+        message += f"  Открыта: {shift[3]}\n"
+        message += f"  Закрыта: {shift[4] if shift[4] else 'Открыта'}\n"
+        message += f"  Выручка: {shift[5] or 0}₽\n"
+        message += f"  Заказов: {shift[6] or 0}\n"
+        message += f"  Статус: {shift[7]}\n"
+        message += "-" * 30 + "\n"
+
+    # Разбиваем сообщение если оно слишком длинное
+    if len(message) > 4000:
+        await update.message.reply_text(message[:4000])
+        if len(message) > 8000:
+            await update.message.reply_text(message[4000:8000])
+            if len(message) > 12000:
+                await update.message.reply_text(message[8000:12000])
+        else:
+            await update.message.reply_text(message[4000:])
+    else:
+        await update.message.reply_text(message)
+
+# ФУНКЦИЯ ДЛЯ ОТЛАДКИ: сбросить данные смены в памяти
+async def reset_shift_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбросить данные смены в памяти"""
+    if not is_admin(update.effective_user.id):
+        return
+
+    # Сброс данных в памяти
+    context.bot_data.clear()
+
+    await update.message.reply_text("✅ Данные смены в памяти сброшены!")
+
+# КОМАНДА ДЛЯ ОТЛАДКИ MiniApp
 async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отладочная информация о MiniApp"""
     if not is_admin(update.effective_user.id):
@@ -1654,7 +1489,35 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message, parse_mode='Markdown')
 
-# ... остальной код остается без изменений ...
+# Упрощенные версии обработчиков (без удаления сообщений)
+async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик неизвестных сообщений"""
+    if update.message:
+        if is_admin(update.effective_user.id):
+            await update.message.reply_text(
+                "❌ Неизвестная команда. Используйте кнопки меню администратора."
+            )
+        else:
+            # Предлагаем открыть MiniApp или показать меню
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🌐 Открыть веб-приложение", callback_data="open_miniapp"),
+                InlineKeyboardButton("📋 Показать меню", callback_data="show_menu")
+            ]])
+            await update.message.reply_text(
+                "Я не понимаю эту команду. Хотите открыть веб-приложение или увидеть меню?",
+                reply_markup=keyboard
+            )
+
+async def handle_back_button(update: Update, context):
+    """Обработчик кнопки 'Назад' для обоих типов пользователей"""
+    user_id = update.effective_user.id
+    
+    if is_admin(user_id):
+        from handlers.admin_utils import back_to_main_menu
+        await back_to_main_menu(update, context)
+    else:
+        from handlers.user_handlers import back_to_main
+        await back_to_main(update, context)
 
 def setup_handlers(application):
     """Настройка всех обработчиков"""
@@ -1868,8 +1731,8 @@ def setup_handlers(application):
     # 8. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset_shift", reset_shift_data))
-    application.add_handler(CommandHandler("debug_shifts", debug_shifts))
+    application.add_handler(CommandHandler("reset_shift", reset_shift_data))  # Исправлено: функция определена
+    application.add_handler(CommandHandler("debug_shifts", debug_shifts))    # Исправлено: функция определена
     application.add_handler(CommandHandler("webapp", open_miniapp))
     application.add_handler(CommandHandler("debug_miniapp", debug_miniapp))  # Новая команда для отладки
 
@@ -1919,6 +1782,8 @@ def main():
         else:
             print("⚠️  MiniApp URL не настроен. Настройте MINIAPP_URL в config.py")
         print("🔧 Отладка MiniApp: /debug_miniapp")
+        print("🔧 Отладка смен: /debug_shifts")
+        print("🔄 Сброс смены: /reset_shift")
         print("=" * 50)
 
         application.run_polling(
