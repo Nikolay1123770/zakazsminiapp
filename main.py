@@ -81,39 +81,1695 @@ if not INDEX_FILE.exists():
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #050505; color: #fff; min-height: 100vh; overflow-x: hidden; }
-        .loader-screen { position: fixed; inset: 0; background: #050505; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        h1, h2, h3, .font-display { font-family: 'Playfair Display', serif; }
+
+        /* ===== LOADER ===== */
+        .loader-screen {
+            position: fixed;
+            inset: 0;
+            background: #050505;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s, visibility 0.5s;
+        }
         .loader-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+        
+        .loader-logo { display: flex; gap: 8px; margin-bottom: 40px; }
+        .loader-box {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #2d1b4e, #4c1d95);
+            border: 2px solid #a855f7;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            animation: boxPulse 1.5s ease-in-out infinite;
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.3);
+        }
+        .loader-box:nth-child(2) { animation-delay: 0.2s; }
+        .loader-box .number { position: absolute; top: 4px; left: 6px; font-size: 10px; color: #a855f7; font-weight: 600; }
+        .loader-box .symbol { font-size: 28px; font-weight: 700; color: #fff; }
+        .loader-box .weight { position: absolute; bottom: 4px; right: 6px; font-size: 8px; color: #a855f7; opacity: 0.7; }
+        
+        @keyframes boxPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(168, 85, 247, 0.3); }
+            50% { transform: scale(1.05); box-shadow: 0 0 50px rgba(168, 85, 247, 0.5); }
+        }
+        
+        .loader-text {
+            font-family: 'Playfair Display', serif;
+            font-size: 14px;
+            color: #666;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            margin-bottom: 30px;
+        }
+        
+        .loader-progress { width: 200px; height: 2px; background: #1a1a1a; border-radius: 1px; overflow: hidden; }
+        .loader-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #a855f7, #7c3aed);
+            width: 0%;
+            animation: loading 2s ease-out forwards;
+            box-shadow: 0 0 10px #a855f7;
+        }
+        @keyframes loading { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 100%; } }
+
+        /* ===== MAIN APP ===== */
         .app { display: none; }
-        .app.visible { display: block; }
-        .container { max-width: 600px; margin: 0 auto; padding: 20px; text-align: center; }
-        h1 { color: #a855f7; margin-bottom: 20px; }
-        p { color: #888; margin-bottom: 30px; }
-        .btn { background: #a855f7; color: white; border: none; padding: 15px 30px; border-radius: 12px; font-size: 16px; cursor: pointer; }
-        .btn:hover { background: #7c3aed; }
+        .app.visible { display: block; animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* ===== VARIABLES ===== */
+        :root {
+            --primary: #a855f7;
+            --primary-dark: #7c3aed;
+            --primary-glow: rgba(168, 85, 247, 0.15);
+            --bg: #050505;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --bg-card-hover: rgba(255, 255, 255, 0.06);
+            --border: rgba(255, 255, 255, 0.06);
+            --text: #ffffff;
+            --text-secondary: #888888;
+            --text-muted: #555555;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(5, 5, 5, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+        }
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-boxes { display: flex; gap: 4px; }
+        .logo-box {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #2d1b4e, #4c1d95);
+            border: 1.5px solid var(--primary);
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
+        }
+        .logo-text h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            text-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+        }
+        .logo-text span { font-size: 10px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; }
+
+        .header-btn {
+            width: 44px;
+            height: 44px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .header-btn:hover { background: var(--bg-card-hover); border-color: var(--primary); }
+
+        /* ===== CONTAINER ===== */
+        .container { max-width: 600px; margin: 0 auto; padding: 0 20px 120px; }
+
+        /* ===== HERO ===== */
+        .hero { text-align: center; padding: 40px 0; position: relative; }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--primary-glow);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 50px;
+            font-size: 12px;
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+        .hero-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .hero h2 { font-size: 32px; font-weight: 600; margin-bottom: 12px; line-height: 1.2; }
+        .hero h2 span {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero p { color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
+
+        /* ===== STATS ===== */
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 32px 0; }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px 16px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .stat-card:hover { border-color: rgba(168, 85, 247, 0.3); background: var(--bg-card-hover); }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+            text-shadow: 0 0 30px rgba(168, 85, 247, 0.5);
+            margin-bottom: 4px;
+        }
+        .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* ===== CATEGORIES ===== */
+        .categories-section { margin: 32px 0; }
+        .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .section-title { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .section-title span {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .categories-scroll {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 4px 0;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .categories-scroll::-webkit-scrollbar { display: none; }
+        
+        .category-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 50px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .category-chip:hover { border-color: rgba(168, 85, 247, 0.3); color: var(--text); }
+        .category-chip.active {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-color: transparent;
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3);
+        }
+        .category-chip .icon { font-size: 16px; }
+
+        /* ===== MENU GRID ===== */
+        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 20px; }
+        
+        .menu-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .menu-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(168, 85, 247, 0.3);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        .menu-card:active { transform: scale(0.98); }
+        
+        .menu-card-image {
+            height: 140px;
+            background: linear-gradient(135deg, rgba(76, 29, 149, 0.3), rgba(45, 27, 78, 0.5));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            position: relative;
+        }
+        .menu-card-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-hit { background: rgba(168, 85, 247, 0.2); color: var(--primary); }
+        .badge-premium { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+        .badge-vip { background: rgba(234, 179, 8, 0.2); color: #eab308; }
+        .badge-signature { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .badge-hot { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        
+        .menu-card-content { padding: 16px; }
+        .menu-card-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+        .menu-card-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        .menu-card-footer { display: flex; align-items: center; justify-content: space-between; }
+        .menu-card-price { font-size: 18px; font-weight: 700; color: var(--primary); }
+        .menu-card-price .old { font-size: 12px; color: var(--text-muted); text-decoration: line-through; margin-left: 6px; font-weight: 400; }
+
+        /* ===== FEATURES ===== */
+        .features { margin: 48px 0; }
+        .feature-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            transition: all 0.3s;
+        }
+        .feature-card:hover { border-color: rgba(168, 85, 247, 0.2); }
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--primary-glow);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .feature-content h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .feature-content p { font-size: 13px; color: var(--text-muted); line-height: 1.4; }
+
+        /* ===== CONTACTS ===== */
+        .contacts-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            margin: 32px 0;
+        }
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .contact-item:last-child { border-bottom: none; }
+        .contact-item:hover { background: var(--bg-card-hover); }
+        .contact-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--primary-glow);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        .contact-info { flex: 1; }
+        .contact-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .contact-value { font-size: 15px; font-weight: 500; }
+        .contact-arrow { color: var(--text-muted); font-size: 18px; }
+
+        /* ===== SCHEDULE CARD ===== */
+        .schedule-card {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(76, 29, 149, 0.2));
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 20px;
+            padding: 24px;
+            margin: 32px 0;
+        }
+        .schedule-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .schedule-header-icon { font-size: 28px; }
+        .schedule-header h4 { font-size: 16px; font-weight: 600; }
+        .schedule-header p { font-size: 12px; color: var(--text-muted); }
+        .schedule-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .schedule-item { background: rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 16px; text-align: center; }
+        .schedule-days { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+        .schedule-time { font-size: 16px; font-weight: 700; color: var(--primary); }
+
+        /* ===== CTA BUTTON ===== */
+        .cta-section { margin: 32px 0; }
+        .cta-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border: none;
+            border-radius: 16px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 8px 30px rgba(168, 85, 247, 0.3);
+        }
+        .cta-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(168, 85, 247, 0.4); }
+        .cta-btn:active { transform: scale(0.98); }
+        .cta-btn .icon { font-size: 20px; }
+
+        /* ===== BOTTOM NAV ===== */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border);
+            padding: 12px 0;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+        .bottom-nav-content { display: flex; justify-content: space-around; max-width: 400px; margin: 0 auto; }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 20px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 12px;
+        }
+        .nav-item .icon { font-size: 22px; transition: all 0.3s; }
+        .nav-item.active { color: var(--primary); }
+        .nav-item.active .icon { transform: scale(1.1); text-shadow: 0 0 20px rgba(168, 85, 247, 0.5); }
+
+        /* ===== SECTIONS ===== */
+        .section { display: none; }
+        .section.active { display: block; animation: sectionFade 0.4s ease; }
+        @keyframes sectionFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ===== BOOKING ===== */
+        .booking-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+        }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .form-input {
+            width: 100%;
+            padding: 16px 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s;
+        }
+        .form-input:focus { border-color: var(--primary); background: rgba(168, 85, 247, 0.03); }
+        .form-input::placeholder { color: var(--text-muted); }
+        select.form-input { cursor: pointer; }
+        select.form-input option { background: #0a0a0a; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        
+        .submit-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border: none;
+            border-radius: 14px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 8px;
+        }
+        .submit-btn:hover { box-shadow: 0 8px 30px rgba(168, 85, 247, 0.4); }
+
+        /* ===== GALLERY ===== */
+        .gallery-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .gallery-item {
+            aspect-ratio: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .gallery-item:hover { transform: scale(1.05); border-color: rgba(168, 85, 247, 0.3); }
+        
+        .review-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .review-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+        .review-avatar {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        .review-info { flex: 1; }
+        .review-name { font-weight: 600; margin-bottom: 2px; }
+        .review-date { font-size: 12px; color: var(--text-muted); }
+        .review-stars { color: #eab308; letter-spacing: 2px; }
+        .review-text { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* ===== PROFILE ===== */
+        .profile-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 24px;
+            padding: 40px 24px;
+            text-align: center;
+        }
+        .profile-avatar {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            margin: 0 auto 20px;
+            box-shadow: 0 8px 40px rgba(168, 85, 247, 0.3);
+        }
+        .profile-name { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+        .profile-username { color: var(--text-muted); font-size: 14px; }
+
+        /* ===== TOAST ===== */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(76, 29, 149, 0.95);
+            border: 1px solid var(--primary);
+            padding: 16px 28px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 3000;
+            transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            box-shadow: 0 10px 40px rgba(168, 85, 247, 0.2);
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast-icon { font-size: 20px; }
+        .toast-message { font-weight: 500; }
+
+        /* ===== MODAL ===== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #0a0a0a;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 28px 28px 0 0;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: all 0.3s;
+        }
+        .modal-overlay.active .modal { transform: translateY(0); }
+        .modal-handle { width: 48px; height: 4px; background: var(--text-muted); border-radius: 2px; margin: 0 auto 24px; }
+        .modal-image {
+            height: 200px;
+            background: linear-gradient(135deg, rgba(76, 29, 149, 0.3), rgba(45, 27, 78, 0.5));
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 72px;
+            margin-bottom: 24px;
+        }
+        .modal-title { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
+        .modal-desc { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+        .modal-price { font-size: 32px; font-weight: 700; color: var(--primary); margin-bottom: 24px; }
+        .modal-close-btn {
+            width: 100%;
+            padding: 18px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .modal-close-btn:hover { border-color: var(--primary); }
+
+        /* ===== LOADING STATES ===== */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .loading-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .error-card {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .error-card h3 { color: #ef4444; margin-bottom: 10px; }
     </style>
 </head>
 <body>
+    <!-- LOADER -->
     <div class="loader-screen" id="loader">
-        <div class="container">
-            <h1>Во Все Тяжкие</h1>
-            <p>Загрузка приложения...</p>
+        <div class="loader-logo">
+            <div class="loader-box">
+                <span class="number">74</span>
+                <span class="symbol">Во</span>
+                <span class="weight">183.8</span>
+            </div>
+            <div class="loader-box">
+                <span class="number">52</span>
+                <span class="symbol">Т</span>
+                <span class="weight">127.6</span>
+            </div>
+        </div>
+        <p class="loader-text">Premium Hookah</p>
+        <div class="loader-progress">
+            <div class="loader-progress-bar"></div>
         </div>
     </div>
-    
+
+    <!-- MAIN APP -->
     <div class="app" id="app">
+        <!-- Toast -->
+        <div class="toast" id="toast">
+            <span class="toast-icon">✓</span>
+            <span class="toast-message">Сообщение</span>
+        </div>
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-boxes">
+                        <div class="logo-box">Во</div>
+                        <div class="logo-box">Т</div>
+                    </div>
+                    <div class="logo-text">
+                        <h1>Во Все Тяжкие</h1>
+                        <span>Premium Hookah</span>
+                    </div>
+                </div>
+                <button class="header-btn" id="headerCallButton">📞</button>
+            </div>
+        </header>
+
         <div class="container">
-            <h1>🌐 MiniApp</h1>
-            <p>Веб-приложение для кальянной "Во Все Тяжкие"</p>
-            <p>Приложение загружается...</p>
-            <button class="btn" onclick="location.reload()">🔄 Обновить</button>
+            <!-- MENU SECTION -->
+            <section class="section active" id="section-menu">
+                <!-- Hero -->
+                <div class="hero">
+                    <div class="hero-badge" id="heroBadge">Мы открыты до 02:00</div>
+                    <h2 class="font-display">Искусство <span>кальяна</span></h2>
+                    <p id="heroText">Погрузитесь в атмосферу премиального отдыха с авторскими миксами</p>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsFlavors">50+</div>
+                        <div class="stat-label">Вкусов</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsExperience">5</div>
+                        <div class="stat-label">Лет опыта</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="statsGuests">10K</div>
+                        <div class="stat-label">Гостей</div>
+                    </div>
+                </div>
+
+                <!-- CTA -->
+                <div class="cta-section">
+                    <button class="cta-btn" onclick="showSection('booking')">
+                        <span class="icon">📅</span>
+                        Забронировать столик
+                    </button>
+                </div>
+
+                <!-- Categories -->
+                <div class="categories-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Наше <span>меню</span></h3>
+                        <button class="header-btn" onclick="loadMenu()" style="width: auto; padding: 0 12px; font-size: 14px;">🔄</button>
+                    </div>
+                    <div class="categories-scroll" id="categoriesContainer">
+                        <!-- Категории загружаются динамически -->
+                    </div>
+                    <div class="menu-grid" id="menuGrid">
+                        <!-- Меню загружается динамически -->
+                    </div>
+                </div>
+
+                <!-- Features -->
+                <div class="features" id="featuresContainer">
+                    <!-- Фичи статические -->
+                    <div class="feature-card">
+                        <div class="feature-icon">🌿</div>
+                        <div class="feature-content">
+                            <h4>Премиум табаки</h4>
+                            <p>Tangiers, Darkside, MustHave, Element — только лучшие бренды</p>
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">👨‍🔬</div>
+                        <div class="feature-content">
+                            <h4>Мастера своего дела</h4>
+                            <p>Наши кальянщики — настоящие алхимики с 5+ лет опыта</p>
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🛋️</div>
+                        <div class="feature-content">
+                            <h4>VIP атмосфера</h4>
+                            <p>Приватные комнаты и уютные зоны для вашего комфорта</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contacts -->
+                <div class="section-header">
+                    <h3 class="section-title">📍 <span>Контакты</span></h3>
+                </div>
+                <div class="contacts-card">
+                    <div class="contact-item" id="addressItem">
+                        <div class="contact-icon">📍</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Адрес</div>
+                            <div class="contact-value" id="contactAddress">ул. Химическая, 52</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" id="phoneItem">
+                        <div class="contact-icon">📞</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Телефон</div>
+                            <div class="contact-value" id="contactPhone">+7 (999) 123-45-67</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" id="instagramItem">
+                        <div class="contact-icon">📸</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Instagram</div>
+                            <div class="contact-value" id="contactInstagram">@vovseTyajkie</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                </div>
+
+                <!-- Schedule -->
+                <div class="schedule-card">
+                    <div class="schedule-header">
+                        <span class="schedule-header-icon">🕐</span>
+                        <div>
+                            <h4>Время работы</h4>
+                            <p>Ждём вас каждый день</p>
+                        </div>
+                    </div>
+                    <div class="schedule-grid">
+                        <div class="schedule-item">
+                            <div class="schedule-days">Пн — Чт</div>
+                            <div class="schedule-time" id="scheduleWeekdays">14:00 — 02:00</div>
+                        </div>
+                        <div class="schedule-item">
+                            <div class="schedule-days">Пт — Вс</div>
+                            <div class="schedule-time" id="scheduleWeekend">14:00 — 04:00</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BOOKING SECTION -->
+            <section class="section" id="section-booking">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">📅 <span>Бронирование</span></h3>
+                </div>
+                <div class="booking-card">
+                    <div class="form-group">
+                        <label class="form-label">Ваше имя</label>
+                        <input type="text" class="form-input" id="bookingName" placeholder="Введите имя">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Телефон</label>
+                        <input type="tel" class="form-input" id="bookingPhone" placeholder="+7 (___) ___-__-__">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Дата</label>
+                            <input type="date" class="form-input" id="bookingDate">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Время</label>
+                            <select class="form-input" id="bookingTime">
+                                <!-- Времена загружаются динамически -->
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Количество гостей</label>
+                        <select class="form-input" id="bookingGuests">
+                            <option value="1-2">1-2 человека</option>
+                            <option value="3-4">3-4 человека</option>
+                            <option value="5-6">5-6 человек</option>
+                            <option value="7+">7+ человек (VIP)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Пожелания</label>
+                        <input type="text" class="form-input" id="bookingComment" placeholder="Особые пожелания...">
+                    </div>
+                    <button class="submit-btn" onclick="submitBooking()" id="bookingSubmitBtn">
+                        <span id="bookingBtnText">Забронировать столик</span>
+                        <span id="bookingLoading" class="loading" style="display: none; margin-left: 10px;"></span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- GALLERY SECTION -->
+            <section class="section" id="section-gallery">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">📸 <span>Галерея</span></h3>
+                </div>
+                <div class="gallery-grid" id="galleryGrid">
+                    <!-- Галерея загружается динамически -->
+                </div>
+
+                <div class="section-header" style="margin: 32px 0 16px;">
+                    <h3 class="section-title">⭐ <span>Отзывы</span></h3>
+                </div>
+                <div id="reviewsContainer">
+                    <!-- Отзывы статические -->
+                    <div class="review-card">
+                        <div class="review-header">
+                            <div class="review-avatar">А</div>
+                            <div class="review-info">
+                                <div class="review-name">Александр</div>
+                                <div class="review-date">2 дня назад</div>
+                            </div>
+                            <div class="review-stars">★★★★★</div>
+                        </div>
+                        <p class="review-text">Лучшая кальянная в городе! Атмосфера невероятная, а микс Heisenberg — это что-то особенное 🔥</p>
+                    </div>
+                    <div class="review-card">
+                        <div class="review-header">
+                            <div class="review-avatar">М</div>
+                            <div class="review-info">
+                                <div class="review-name">Мария</div>
+                                <div class="review-date">Неделю назад</div>
+                            </div>
+                            <div class="review-stars">★★★★★</div>
+                        </div>
+                        <p class="review-text">Были с подругами на девичнике — всё прошло идеально! Персонал очень внимательный 💨</p>
+                    </div>
+                    <div class="review-card">
+                        <div class="review-header">
+                            <div class="review-avatar">Д</div>
+                            <div class="review-info">
+                                <div class="review-name">Дмитрий</div>
+                                <div class="review-date">2 недели назад</div>
+                            </div>
+                            <div class="review-stars">★★★★★</div>
+                        </div>
+                        <p class="review-text">Отличное место для отдыха. Премиальные табаки, уютная атмосфера. Рекомендую!</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- PROFILE SECTION -->
+            <section class="section" id="section-profile">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">👤 <span>Профиль</span></h3>
+                    <button class="header-btn" onclick="loadUserData()" style="width: auto; padding: 0 12px; font-size: 14px;">🔄</button>
+                </div>
+                
+                <div class="profile-card" id="profileCard">
+                    <div class="profile-avatar" id="profileAvatar">👤</div>
+                    <div class="profile-name" id="profileName">Гость</div>
+                    <div class="profile-username" id="profileUsername"></div>
+                    <div class="profile-balance" style="margin-top: 15px; padding: 10px; background: rgba(168,85,247,0.1); border-radius: 10px;">
+                        <div style="font-size: 14px; color: #a855f7;">Ваш баланс:</div>
+                        <div style="font-size: 24px; font-weight: 700;" id="profileBalance">0 бонусов</div>
+                    </div>
+                </div>
+
+                <!-- My Bookings -->
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">📅 <span>Мои бронирования</span></h3>
+                </div>
+                <div id="myBookings">
+                    <!-- Бронирования загружаются динамически -->
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="contacts-card" style="margin-top: 20px;">
+                    <div class="contact-item" onclick="showSection('booking')">
+                        <div class="contact-icon">📅</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Забронировать столик</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" id="profileCallButton">
+                        <div class="contact-icon">📞</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Позвонить нам</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" id="profileInstagramButton">
+                        <div class="contact-icon">📸</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Instagram</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <nav class="bottom-nav">
+            <div class="bottom-nav-content">
+                <button class="nav-item active" onclick="showSection('menu')">
+                    <span class="icon">🏠</span>
+                    <span>Меню</span>
+                </button>
+                <button class="nav-item" onclick="showSection('booking')">
+                    <span class="icon">📅</span>
+                    <span>Бронь</span>
+                </button>
+                <button class="nav-item" onclick="showSection('gallery')">
+                    <span class="icon">📸</span>
+                    <span>Галерея</span>
+                </button>
+                <button class="nav-item" onclick="showSection('profile')">
+                    <span class="icon">👤</span>
+                    <span>Профиль</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Product Modal -->
+        <div class="modal-overlay" id="productModal" onclick="closeModal(event)">
+            <div class="modal" onclick="event.stopPropagation()">
+                <div class="modal-handle"></div>
+                <div class="modal-image" id="modalImage">💨</div>
+                <h3 class="modal-title" id="modalTitle">Название</h3>
+                <p class="modal-desc" id="modalDesc">Описание товара</p>
+                <div class="modal-price" id="modalPrice">0₽</div>
+                <button class="modal-close-btn" onclick="closeModal()">Закрыть</button>
+            </div>
         </div>
     </div>
-    
+
     <script>
-        setTimeout(() => {
-            document.getElementById('loader').classList.add('hidden');
-            document.getElementById('app').classList.add('visible');
-        }, 2000);
+        const tg = window.Telegram?.WebApp;
+        const API_URL = window.location.origin; // Базовый URL API
+        const IS_TELEGRAM = !!tg;
+        
+        let menuItems = [];
+        let userData = null;
+        let currentCategory = 'all';
+        let configData = null;
+
+        // Инициализация приложения
+        async function init() {
+            try {
+                console.log('🚀 Инициализация MiniApp...');
+                
+                if (tg) {
+                    console.log('📱 Telegram WebApp обнаружен');
+                    tg.ready();
+                    tg.expand();
+                    
+                    // Устанавливаем тему
+                    if (tg.colorScheme === 'dark') {
+                        document.documentElement.style.setProperty('--bg', '#050505');
+                    }
+                    
+                    // Скрываем кнопку если не нужно
+                    tg.MainButton.hide();
+                }
+                
+                // Загружаем конфигурацию
+                await loadConfig();
+                
+                // Загружаем меню
+                await loadMenu();
+                
+                // Загружаем галерею
+                await loadGallery();
+                
+                // Настраиваем форму бронирования
+                setupBookingForm();
+                
+                // Загружаем данные пользователя если он в Telegram
+                if (tg?.initDataUnsafe?.user) {
+                    console.log('👤 Пользователь Telegram обнаружен:', tg.initDataUnsafe.user);
+                    await loadUserData();
+                }
+                
+                // Показываем приложение
+                setTimeout(() => {
+                    document.getElementById('loader').classList.add('hidden');
+                    document.getElementById('app').classList.add('visible');
+                    showToast('Добро пожаловать в Во Все Тяжкие!');
+                }, 1000);
+                
+            } catch (error) {
+                console.error('❌ Ошибка инициализации:', error);
+                showToast('Ошибка загрузки данных');
+                
+                // Все равно показываем приложение
+                setTimeout(() => {
+                    document.getElementById('loader').classList.add('hidden');
+                    document.getElementById('app').classList.add('visible');
+                }, 1000);
+            }
+        }
+
+        // Загрузить конфигурацию
+        async function loadConfig() {
+            try {
+                console.log('⚙️ Загрузка конфигурации...');
+                const response = await fetch(`${API_URL}/api/config`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                configData = await response.json();
+                console.log('✅ Конфигурация загружена:', configData);
+                
+                // Обновляем контакты
+                if (configData.contacts) {
+                    document.getElementById('contactAddress').textContent = configData.contacts.address;
+                    document.getElementById('contactPhone').textContent = configData.contacts.phone;
+                    document.getElementById('contactInstagram').textContent = configData.contacts.instagram;
+                    
+                    // Настраиваем клики
+                    const phone = configData.contacts.phone.replace(/\D/g, '');
+                    const instagram = configData.contacts.instagram.replace('@', '');
+                    const address = encodeURIComponent(configData.contacts.address);
+                    
+                    document.getElementById('headerCallButton').onclick = () => openLink(`tel:${phone}`);
+                    document.getElementById('phoneItem').onclick = () => openLink(`tel:${phone}`);
+                    document.getElementById('profileCallButton').onclick = () => openLink(`tel:${phone}`);
+                    document.getElementById('instagramItem').onclick = () => openLink(`https://instagram.com/${instagram}`);
+                    document.getElementById('profileInstagramButton').onclick = () => openLink(`https://instagram.com/${instagram}`);
+                    document.getElementById('addressItem').onclick = () => openLink(`https://maps.google.com/?q=${address}`);
+                }
+                
+                // Обновляем график работы
+                if (configData.schedule) {
+                    document.getElementById('scheduleWeekdays').textContent = configData.schedule.weekdays;
+                    document.getElementById('scheduleWeekend').textContent = configData.schedule.weekend;
+                }
+                
+                // Обновляем статистику
+                if (configData.stats) {
+                    document.getElementById('statsFlavors').textContent = configData.stats.flavors;
+                    document.getElementById('statsExperience').textContent = configData.stats.experience;
+                    document.getElementById('statsGuests').textContent = configData.stats.guests;
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки конфигурации:', error);
+                // Используем значения по умолчанию
+            }
+        }
+
+        // Загрузить меню
+        async function loadMenu() {
+            try {
+                console.log('🍽️ Загрузка меню...');
+                const response = await fetch(`${API_URL}/api/menu`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                menuItems = await response.json();
+                console.log(`✅ Меню загружено: ${menuItems.length} товаров`);
+                
+                // Извлекаем категории
+                const categories = [...new Set(menuItems.map(item => item.category))];
+                renderCategories(categories);
+                renderMenu(menuItems);
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки меню:', error);
+                showToast('Ошибка загрузки меню');
+                
+                // Показываем сообщение об ошибке
+                document.getElementById('menuGrid').innerHTML = `
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                        <div style="font-size: 48px; margin-bottom: 20px;">😔</div>
+                        <p style="color: #888; margin-bottom: 20px;">Не удалось загрузить меню</p>
+                        <button onclick="loadMenu()" class="submit-btn" style="padding: 12px 24px;">
+                            Повторить попытку
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // Рендеринг категорий
+        function renderCategories(categories) {
+            const container = document.getElementById('categoriesContainer');
+            if (!container) return;
+            
+            const categoryNames = {
+                'hookah': 'Кальяны',
+                'signature': 'Авторские',
+                'drinks': 'Напитки',
+                'food': 'Кухня'
+            };
+            
+            const categoryIcons = {
+                'hookah': '💨',
+                'signature': '⚗️',
+                'drinks': '🍹',
+                'food': '🍕'
+            };
+            
+            let html = `
+                <button class="category-chip active" onclick="filterMenu('all', this)">
+                    <span class="icon">✨</span> Всё меню
+                </button>
+            `;
+            
+            categories.forEach(category => {
+                const name = categoryNames[category] || category;
+                const icon = categoryIcons[category] || '🍽️';
+                
+                html += `
+                    <button class="category-chip" onclick="filterMenu('${category}', this)">
+                        <span class="icon">${icon}</span> ${name}
+                    </button>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+
+        // Рендеринг меню
+        function renderMenu(items) {
+            const container = document.getElementById('menuGrid');
+            if (!container) return;
+            
+            if (!items || items.length === 0) {
+                container.innerHTML = `
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 40px;">
+                        <div style="font-size: 48px; margin-bottom: 20px;">🍽️</div>
+                        <p style="color: #888; margin-bottom: 20px;">Меню пока пустое</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const badgeLabels = {
+                'hit': 'Хит',
+                'premium': 'Premium',
+                'vip': 'VIP',
+                'signature': 'Авторский',
+                'hot': 'Острое',
+                'new': 'Новинка'
+            };
+            
+            container.innerHTML = items.map(item => `
+                <div class="menu-card" onclick="openProduct(${item.id})">
+                    <div class="menu-card-image">
+                        ${item.badge ? `
+                            <span class="menu-card-badge badge-${item.badge}">
+                                ${badgeLabels[item.badge] || item.badge}
+                            </span>
+                        ` : ''}
+                        ${item.icon || '🍽️'}
+                    </div>
+                    <div class="menu-card-content">
+                        <h4 class="menu-card-title">${item.name}</h4>
+                        <p class="menu-card-desc">${item.description || ''}</p>
+                        <div class="menu-card-footer">
+                            <span class="menu-card-price">
+                                ${item.price}₽
+                                ${item.old_price ? `<span class="old">${item.old_price}₽</span>` : ''}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Фильтрация меню
+        function filterMenu(category, btn) {
+            // Обновляем активные кнопки
+            document.querySelectorAll('.category-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            currentCategory = category;
+            
+            if (category === 'all') {
+                renderMenu(menuItems);
+            } else {
+                const filtered = menuItems.filter(item => item.category === category);
+                renderMenu(filtered);
+            }
+            
+            haptic();
+        }
+
+        // Загрузить данные пользователя
+        async function loadUserData() {
+            if (!tg?.initDataUnsafe?.user) {
+                console.log('ℹ️ Пользователь не в Telegram');
+                return;
+            }
+            
+            try {
+                console.log('👤 Загрузка данных пользователя...');
+                const user = tg.initDataUnsafe.user;
+                
+                // Создаем заголовки для запроса
+                const headers = {};
+                if (tg.initData) {
+                    headers['X-Telegram-Init-Data'] = tg.initData;
+                }
+                
+                const response = await fetch(`${API_URL}/api/user/${user.id}`, { headers });
+                
+                if (response.status === 404) {
+                    console.log('👤 Пользователь не найден, создаем нового...');
+                    // Создаем нового пользователя
+                    const createResponse = await fetch(`${API_URL}/api/user/create`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Telegram-Init-Data': tg.initData
+                        },
+                        body: JSON.stringify({
+                            user_id: user.id,
+                            first_name: user.first_name,
+                            last_name: user.last_name || '',
+                            username: user.username || '',
+                            language_code: user.language_code || 'ru'
+                        })
+                    });
+                    
+                    if (createResponse.ok) {
+                        userData = await createResponse.json();
+                        console.log('✅ Пользователь создан:', userData);
+                    }
+                } else if (response.ok) {
+                    userData = await response.json();
+                    console.log('✅ Данные пользователя загружены:', userData);
+                }
+                
+                updateUserProfile(userData);
+                await loadUserBookings();
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки пользователя:', error);
+            }
+        }
+
+        // Обновить профиль пользователя
+        function updateUserProfile(data) {
+            if (!data) return;
+            
+            document.getElementById('profileName').textContent = data.first_name || 'Гость';
+            document.getElementById('profileUsername').textContent = data.username ? '@' + data.username : '';
+            document.getElementById('profileAvatar').textContent = (data.first_name || 'Г')[0];
+            document.getElementById('profileBalance').textContent = `${data.bonus_balance || 0} бонусов`;
+            
+            // Заполняем форму бронирования
+            if (data.phone) {
+                document.getElementById('bookingPhone').value = data.phone;
+            }
+            if (data.first_name) {
+                document.getElementById('bookingName').value = data.first_name;
+            }
+        }
+
+        // Загрузить бронирования пользователя
+        async function loadUserBookings() {
+            if (!userData?.user_id) return;
+            
+            try {
+                const headers = {};
+                if (tg?.initData) {
+                    headers['X-Telegram-Init-Data'] = tg.initData;
+                }
+                
+                const response = await fetch(`${API_URL}/api/bookings/${userData.user_id}`, { headers });
+                
+                if (response.ok) {
+                    const bookings = await response.json();
+                    renderUserBookings(bookings);
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки бронирований:', error);
+            }
+        }
+
+        // Рендеринг бронирований пользователя
+        function renderUserBookings(bookings) {
+            const container = document.getElementById('myBookings');
+            if (!container) return;
+            
+            if (!bookings || bookings.length === 0) {
+                container.innerHTML = `
+                    <div class="booking-card" style="margin-top: 10px;">
+                        <p style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            У вас пока нет бронирований
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '<div class="booking-card" style="margin-top: 10px;">';
+            
+            bookings.forEach(booking => {
+                const statusColors = {
+                    'pending': 'var(--primary)',
+                    'confirmed': '#10b981',
+                    'cancelled': '#ef4444'
+                };
+                
+                const statusTexts = {
+                    'pending': '⏳ Ожидание',
+                    'confirmed': '✅ Подтверждено',
+                    'cancelled': '❌ Отменено'
+                };
+                
+                html += `
+                    <div style="padding: 15px; border-bottom: 1px solid var(--border);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <strong>${booking.date} в ${booking.time}</strong>
+                            <span style="color: ${statusColors[booking.status] || 'var(--text-muted)'}; font-size: 12px;">
+                                ${statusTexts[booking.status] || booking.status}
+                            </span>
+                        </div>
+                        <div style="font-size: 14px; color: var(--text-secondary);">
+                            👥 ${booking.guests} гостей
+                            ${booking.comment ? `<br>💬 ${booking.comment}` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Загрузить галерею
+        async function loadGallery() {
+            try {
+                const response = await fetch(`${API_URL}/api/gallery`);
+                
+                if (response.ok) {
+                    const gallery = await response.json();
+                    renderGallery(gallery);
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка загрузки галереи:', error);
+            }
+        }
+
+        // Рендеринг галереи
+        function renderGallery(items) {
+            const container = document.getElementById('galleryGrid');
+            if (!container) return;
+            
+            if (!items || items.length === 0) {
+                // Галерея по умолчанию
+                const defaultGallery = ['🧪', '💨', '🛋️', '🍹', '🔥', '⚗️'];
+                container.innerHTML = defaultGallery.map(emoji => `
+                    <div class="gallery-item">
+                        ${emoji}
+                    </div>
+                `).join('');
+                return;
+            }
+            
+            container.innerHTML = items.map(item => `
+                <div class="gallery-item" title="${item.title || ''}">
+                    ${item.emoji}
+                </div>
+            `).join('');
+        }
+
+        // Настроить форму бронирования
+        function setupBookingForm() {
+            const today = new Date();
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            
+            const dateInput = document.getElementById('bookingDate');
+            dateInput.min = tomorrow.toISOString().split('T')[0];
+            dateInput.value = tomorrow.toISOString().split('T')[0];
+            
+            // Заполняем времена
+            const timeSelect = document.getElementById('bookingTime');
+            timeSelect.innerHTML = '';
+            
+            // Генерируем времена с 14:00 до 02:00
+            for (let hour = 14; hour <= 23; hour++) {
+                const time = `${hour.toString().padStart(2, '0')}:00`;
+                const option = document.createElement('option');
+                option.value = time;
+                option.textContent = time;
+                timeSelect.appendChild(option);
+            }
+            
+            for (let hour = 0; hour <= 2; hour++) {
+                const time = `${hour.toString().padStart(2, '0')}:00`;
+                const option = document.createElement('option');
+                option.value = time;
+                option.textContent = time;
+                timeSelect.appendChild(option);
+            }
+            
+            // Устанавливаем текущее время + 1 час
+            const now = new Date();
+            const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
+            let defaultHour = nextHour.getHours();
+            if (defaultHour < 14) defaultHour = 14;
+            if (defaultHour > 2 && defaultHour < 14) defaultHour = 14;
+            
+            const defaultTime = defaultHour.toString().padStart(2, '0') + ':00';
+            timeSelect.value = defaultTime;
+        }
+
+        // Открыть товар
+        async function openProduct(itemId) {
+            const product = menuItems.find(item => item.id === itemId);
+            
+            if (!product) {
+                showToast('Товар не найден');
+                return;
+            }
+            
+            document.getElementById('modalImage').textContent = product.icon || '🍽️';
+            document.getElementById('modalTitle').textContent = product.name;
+            document.getElementById('modalDesc').textContent = product.description || '';
+            document.getElementById('modalPrice').textContent = `${product.price}₽`;
+            
+            document.getElementById('productModal').classList.add('active');
+            haptic();
+        }
+
+        // Закрыть модальное окно
+        function closeModal() {
+            document.getElementById('productModal').classList.remove('active');
+        }
+
+        // Отправить бронирование
+        async function submitBooking() {
+            const name = document.getElementById('bookingName').value.trim();
+            const phone = document.getElementById('bookingPhone').value.trim();
+            const date = document.getElementById('bookingDate').value;
+            const time = document.getElementById('bookingTime').value;
+            const guests = document.getElementById('bookingGuests').value;
+            const comment = document.getElementById('bookingComment').value.trim();
+            
+            // Валидация
+            if (!name) {
+                showToast('Введите ваше имя');
+                document.getElementById('bookingName').focus();
+                return;
+            }
+            
+            if (!phone || phone.replace(/\D/g, '').length < 10) {
+                showToast('Введите корректный телефон');
+                document.getElementById('bookingPhone').focus();
+                return;
+            }
+            
+            if (!date) {
+                showToast('Выберите дату');
+                return;
+            }
+            
+            // Показываем индикатор загрузки
+            const submitBtn = document.getElementById('bookingSubmitBtn');
+            const btnText = document.getElementById('bookingBtnText');
+            const loading = document.getElementById('bookingLoading');
+            
+            submitBtn.disabled = true;
+            btnText.textContent = 'Отправка...';
+            loading.style.display = 'inline-block';
+            
+            try {
+                // Подготавливаем данные
+                const bookingData = {
+                    name: name,
+                    phone: phone,
+                    date: date,
+                    time: time,
+                    guests: guests,
+                    comment: comment,
+                    source: 'miniapp'
+                };
+                
+                // Добавляем ID пользователя если он есть
+                if (userData?.user_id) {
+                    bookingData.user_id = userData.user_id;
+                }
+                
+                // Создаем заголовки
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+                
+                if (tg?.initData) {
+                    headers['X-Telegram-Init-Data'] = tg.initData;
+                }
+                
+                const response = await fetch(`${API_URL}/api/booking/create`, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(bookingData)
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    showToast('✅ Бронирование отправлено! Мы свяжемся с вами.');
+                    
+                    // Очищаем форму
+                    document.getElementById('bookingComment').value = '';
+                    
+                    // Показываем меню
+                    showSection('menu');
+                    
+                    // Обновляем бронирования пользователя
+                    if (userData?.user_id) {
+                        await loadUserBookings();
+                    }
+                    
+                    // Отправляем данные в Telegram если есть
+                    if (tg) {
+                        try {
+                            tg.sendData(JSON.stringify({
+                                type: 'booking_created',
+                                booking_id: result.booking_id
+                            }));
+                        } catch (e) {
+                            console.log('ℹ️ Не удалось отправить данные в Telegram');
+                        }
+                    }
+                    
+                } else {
+                    const error = await response.json();
+                    showToast(error.error || 'Ошибка при отправке');
+                }
+                
+            } catch (error) {
+                console.error('❌ Ошибка бронирования:', error);
+                showToast('Ошибка сети. Проверьте подключение.');
+            } finally {
+                // Возвращаем кнопку в исходное состояние
+                submitBtn.disabled = false;
+                btnText.textContent = 'Забронировать столик';
+                loading.style.display = 'none';
+            }
+            
+            haptic();
+        }
+
+        // Навигация по разделам
+        function showSection(id) {
+            // Скрываем все разделы
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
+            // Показываем нужный раздел
+            const section = document.getElementById('section-' + id);
+            if (section) {
+                section.classList.add('active');
+                
+                // Обновляем навигацию
+                const navIndex = {menu: 0, booking: 1, gallery: 2, profile: 3};
+                const navItems = document.querySelectorAll('.nav-item');
+                if (navItems[navIndex[id]]) {
+                    navItems[navIndex[id]].classList.add('active');
+                }
+                
+                // Прокручиваем вверх
+                window.scrollTo({top: 0, behavior: 'smooth'});
+                
+                // Загружаем данные если нужно
+                if (id === 'profile' && tg?.initDataUnsafe?.user) {
+                    loadUserData();
+                }
+            }
+            
+            haptic();
+        }
+
+        // Вспомогательные функции
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            if (!toast) return;
+            
+            toast.querySelector('.toast-message').textContent = message;
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function haptic() {
+            if (tg?.HapticFeedback) {
+                try {
+                    tg.HapticFeedback.impactOccurred('light');
+                } catch (e) {
+                    // Игнорируем ошибки вибрации
+                }
+            }
+        }
+
+        function openLink(url) {
+            if (tg) {
+                try {
+                    tg.openLink(url);
+                } catch (e) {
+                    window.open(url, '_blank');
+                }
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        // Запуск приложения
+        document.addEventListener('DOMContentLoaded', init);
+        
+        // Экспортируем функции для глобального доступа
+        window.openProduct = openProduct;
+        window.closeModal = closeModal;
+        window.submitBooking = submitBooking;
+        window.showSection = showSection;
+        window.filterMenu = filterMenu;
+        window.loadMenu = loadMenu;
+        window.loadUserData = loadUserData;
+        window.openLink = openLink;
     </script>
 </body>
 </html>""")
@@ -1275,3 +2931,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
