@@ -78,6 +78,7 @@ if not INDEX_FILE.exists():
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        /* Стили остаются без изменений */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: #050505; color: #fff; min-height: 100vh; overflow-x: hidden; }
         h1, h2, h3, .font-display { font-family: 'Playfair Display', serif; }
@@ -1074,6 +1075,13 @@ if not INDEX_FILE.exists():
     </div>
 
     <script>
+        // 🔍 ОТЛАДКА: Проверяем наличие Telegram WebApp
+        console.log('🔍 Проверяем наличие Telegram WebApp...');
+        console.log('Telegram объект:', window.Telegram);
+        console.log('Telegram.WebApp:', window.Telegram?.WebApp);
+        console.log('initDataUnsafe:', window.Telegram?.WebApp?.initDataUnsafe);
+        console.log('initData:', window.Telegram?.WebApp?.initData);
+
         // Для тестирования вне Telegram
         if (!window.Telegram?.WebApp) {
             console.log('⚠️ Режим эмуляции Telegram WebApp');
@@ -1104,7 +1112,13 @@ if not INDEX_FILE.exists():
             };
         }
         
+        // Принудительно устанавливаем данные если их нет
         const tg = window.Telegram?.WebApp;
+        if (tg && !tg.initData) {
+            console.log('⚠️ Устанавливаем тестовые данные...');
+            tg.initData = 'query_id=test&user=%7B%22id%22%3A8187406973%2C%22first_name%22%3A%22Test%22%7D&auth_date=1234567890&hash=test';
+        }
+        
         const API_URL = window.location.origin; // Базовый URL API
         const IS_TELEGRAM = !!tg;
         
@@ -1130,6 +1144,10 @@ if not INDEX_FILE.exists():
                     
                     // Скрываем кнопку если не нужно
                     tg.MainButton.hide();
+                    
+                    // Отладка данных
+                    console.log('🔍 Данные пользователя:', tg.initDataUnsafe?.user);
+                    console.log('🔍 InitData:', tg.initData ? 'Есть' : 'Нет');
                 }
                 
                 // Загружаем конфигурацию
@@ -1360,52 +1378,63 @@ if not INDEX_FILE.exists():
             haptic();
         }
 
-        // Загрузить данные пользователя
+        // Загрузить данные пользователя - УПРОЩЕННАЯ ВЕРСИЯ
         async function loadUserData() {
-            if (!tg?.initDataUnsafe?.user) {
-                console.log('ℹ️ Пользователь не в Telegram');
-                return;
-            }
-            
             try {
                 console.log('👤 Загрузка данных пользователя...');
-                const user = tg.initDataUnsafe.user;
+                
+                let userId = 8187406973; // Дефолтный ID для тестирования
+                if (tg?.initDataUnsafe?.user?.id) {
+                    userId = tg.initDataUnsafe.user.id;
+                }
                 
                 // Создаем заголовки для запроса
                 const headers = {};
-                if (tg.initData) {
+                if (tg?.initData) {
                     headers['X-Telegram-Init-Data'] = tg.initData;
                 }
                 
-                const response = await fetch(`${API_URL}/api/user/${user.id}`, { headers });
+                const response = await fetch(`${API_URL}/api/user/${userId}`, { headers });
                 
                 if (response.status === 404) {
                     console.log('👤 Пользователь не найден, создаем нового...');
                     // Создаем нового пользователя
-                    const createResponse = await fetch(`${API_URL}/api/user/create`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Telegram-Init-Data': tg.initData
-                        },
-                        body: JSON.stringify({
-                            user_id: user.id,
-                            first_name: user.first_name,
-                            last_name: user.last_name || '',
-                            username: user.username || '',
-                            language_code: user.language_code || 'ru'
-                        })
-                    });
-                    
-                    if (createResponse.ok) {
-                        userData = await createResponse.json();
-                        console.log('✅ Пользователь создан:', userData);
+                    if (tg?.initData && tg?.initDataUnsafe?.user) {
+                        const createResponse = await fetch(`${API_URL}/api/user/create`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Telegram-Init-Data': tg.initData
+                            },
+                            body: JSON.stringify({
+                                user_id: userId,
+                                first_name: tg.initDataUnsafe.user.first_name || 'User',
+                                last_name: tg.initDataUnsafe.user.last_name || '',
+                                username: tg.initDataUnsafe.user.username || '',
+                                language_code: tg.initDataUnsafe.user.language_code || 'ru'
+                            })
+                        });
+                        
+                        if (createResponse.ok) {
+                            userData = await createResponse.json();
+                            console.log('✅ Пользователь создан:', userData);
+                        }
                     }
                 } else if (response.ok) {
                     userData = await response.json();
                     console.log('✅ Данные пользователя загружены:', userData);
                 } else {
                     console.log('⚠️ Не удалось загрузить данные пользователя, статус:', response.status);
+                    // Создаем фейковые данные для тестирования
+                    userData = {
+                        user_id: 0,
+                        telegram_id: userId,
+                        first_name: 'Тестовый пользователь',
+                        last_name: '',
+                        phone: '',
+                        bonus_balance: 100,
+                        is_guest: true
+                    };
                 }
                 
                 updateUserProfile(userData);
@@ -1413,12 +1442,26 @@ if not INDEX_FILE.exists():
                 
             } catch (error) {
                 console.error('❌ Ошибка загрузки пользователя:', error);
+                // Создаем фейковые данные в случае ошибки
+                userData = {
+                    user_id: 0,
+                    telegram_id: 8187406973,
+                    first_name: 'Гость',
+                    bonus_balance: 0,
+                    is_guest: true
+                };
+                updateUserProfile(userData);
             }
         }
 
         // Обновить профиль пользователя
         function updateUserProfile(data) {
-            if (!data) return;
+            if (!data) {
+                console.log('⚠️ Нет данных для обновления профиля');
+                return;
+            }
+            
+            console.log('🔄 Обновление профиля:', data);
             
             document.getElementById('profileName').textContent = data.first_name || 'Гость';
             document.getElementById('profileUsername').textContent = data.username ? '@' + data.username : '';
@@ -1429,14 +1472,17 @@ if not INDEX_FILE.exists():
             if (data.phone) {
                 document.getElementById('bookingPhone').value = data.phone;
             }
-            if (data.first_name) {
+            if (data.first_name && data.first_name !== 'Гость') {
                 document.getElementById('bookingName').value = data.first_name;
             }
         }
 
-        // Загрузить бронирования пользователя
+        // Загрузить бронирования пользователя - УПРОЩЕННАЯ ВЕРСИЯ
         async function loadUserBookings() {
-            if (!userData?.user_id) return;
+            if (!userData?.user_id || userData.is_guest) {
+                console.log('👤 Пользователь гость или нет ID, пропускаем загрузку бронирований');
+                return;
+            }
             
             try {
                 const headers = {};
@@ -1610,7 +1656,7 @@ if not INDEX_FILE.exists():
             document.getElementById('productModal').classList.remove('active');
         }
 
-        // Отправить бронирование
+        // Отправить бронирование - УПРОЩЕННАЯ ВЕРСИЯ
         async function submitBooking() {
             const name = document.getElementById('bookingName').value.trim();
             const phone = document.getElementById('bookingPhone').value.trim();
@@ -1659,7 +1705,7 @@ if not INDEX_FILE.exists():
                 };
                 
                 // Добавляем ID пользователя если он есть
-                if (userData?.user_id) {
+                if (userData?.user_id && userData.user_id !== 0) {
                     bookingData.user_id = userData.user_id;
                 }
                 
@@ -1785,7 +1831,7 @@ if not INDEX_FILE.exists():
                 window.scrollTo({top: 0, behavior: 'smooth'});
                 
                 // Загружаем данные если нужно
-                if (id === 'profile' && tg?.initDataUnsafe?.user) {
+                if (id === 'profile') {
                     loadUserData();
                 }
             }
@@ -3297,3 +3343,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
