@@ -2,4 +2,6 @@ python-telegram-bot==20.7
 python-dotenv==1.0.0
 pandas==2.1.4
 flask
+flask_cors
 pytz==2023.3
+
