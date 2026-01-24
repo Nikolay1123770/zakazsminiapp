@@ -1,10 +1,9 @@
 import logging
 import os
 import warnings
-import asyncio
 import threading
 import json
-import re
+import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
@@ -15,7 +14,7 @@ from config import BOT_TOKEN, ADMIN_IDS, MINIAPP_URL
 from error_logger import setup_error_logging
 
 # Импорт для веб-сервера
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +46,7 @@ if not STATIC_DIR.exists():
 INDEX_FILE = STATIC_DIR / "index.html"
 if not INDEX_FILE.exists():
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
+        # Вставьте сюда ваш полный HTML код MiniApp
         f.write("""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1181,7 +1181,7 @@ if not INDEX_FILE.exists():
     </script>
 </body>
 </html>""")
-    logger.info("📄 Создан index.html в папке static. Вставьте ваш HTML код")
+    logger.info("📄 Создан index.html в папке static")
 
 # Создаем FastAPI приложение для MiniApp
 web_app = FastAPI(title="Vovsetyagskie MiniApp")
@@ -1209,9 +1209,14 @@ async def serve_miniapp():
 async def health_check():
     return JSONResponse({"status": "ok", "service": "miniapp", "port": 3000})
 
+# Функция для запуска веб-сервера в отдельном потоке
 def run_web_server():
     """Запуск веб-сервера в отдельном потоке"""
     try:
+        # Устанавливаем новый event loop для этого потока
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         config = uvicorn.Config(
             web_app, 
             host="0.0.0.0", 
@@ -1222,7 +1227,7 @@ def run_web_server():
         )
         server = uvicorn.Server(config)
         logger.info("🌐 Веб-сервер MiniApp запущен на порту 3000")
-        server.run()
+        loop.run_until_complete(server.serve())
     except Exception as e:
         logger.error(f"❌ Ошибка веб-сервера: {e}")
 
@@ -1475,12 +1480,20 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     
+    # Проверяем, запущен ли веб-сервер
+    web_server_running = False
+    for thread in threading.enumerate():
+        if thread.name == 'web_server_thread':
+            web_server_running = thread.is_alive()
+            break
+    
     status_info = {
-        "web_server": "running" if threading.active_count() > 1 else "stopped",
+        "web_server": "✅ running" if web_server_running else "❌ stopped",
         "mini_app_url": MINIAPP_URL or "Не настроен",
         "static_dir": str(STATIC_DIR.absolute()),
-        "index_file_exists": INDEX_FILE.exists(),
-        "port": 3000
+        "index_file_exists": "✅ да" if INDEX_FILE.exists() else "❌ нет",
+        "port": 3000,
+        "threads": threading.active_count()
     }
     
     message = "🔧 **Отладка MiniApp**\n\n"
@@ -1731,10 +1744,10 @@ def setup_handlers(application):
     # 8. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("reset_shift", reset_shift_data))  # Исправлено: функция определена
-    application.add_handler(CommandHandler("debug_shifts", debug_shifts))    # Исправлено: функция определена
+    application.add_handler(CommandHandler("reset_shift", reset_shift_data))
+    application.add_handler(CommandHandler("debug_shifts", debug_shifts))
     application.add_handler(CommandHandler("webapp", open_miniapp))
-    application.add_handler(CommandHandler("debug_miniapp", debug_miniapp))  # Новая команда для отладки
+    application.add_handler(CommandHandler("debug_miniapp", debug_miniapp))
 
     # 9. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Назад$"), handle_back_button))
@@ -1752,7 +1765,11 @@ def main():
             return
 
         # Запуск веб-сервера в отдельном потоке
-        web_thread = threading.Thread(target=run_web_server, daemon=True)
+        web_thread = threading.Thread(
+            target=run_web_server, 
+            daemon=True,
+            name="web_server_thread"
+        )
         web_thread.start()
         logger.info("🌐 Веб-сервер MiniApp запущен в отдельном потоке")
         
@@ -1760,7 +1777,7 @@ def main():
         import time
         time.sleep(2)
 
-        # Создание приложения
+        # Создание приложения бота
         application = Application.builder() \
             .token(BOT_TOKEN) \
             .post_init(post_init) \
@@ -1777,6 +1794,7 @@ def main():
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
         print("🌐 MiniApp доступен по команде /webapp")
         print("🌐 Веб-сервер работает на: http://localhost:3000")
+        print("🌐 Проверка: http://localhost:3000/health")
         if MINIAPP_URL:
             print(f"🌐 Внешний доступ: {MINIAPP_URL}")
         else:
@@ -1786,6 +1804,7 @@ def main():
         print("🔄 Сброс смены: /reset_shift")
         print("=" * 50)
 
+        # Запуск бота (синхронный метод)
         application.run_polling(
             allowed_updates=['message', 'callback_query', 'web_app_data'],
             timeout=60,
