@@ -309,7 +309,7 @@ async def post_init(application):
     
     # Проверяем настройки MiniApp
     if MINIAPP_URL:
-        logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}"https://vovsetyagskie.bothost.ru")
+        logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
         
         # Проверяем доступность MiniApp
         try:
@@ -781,4 +781,5 @@ async def main():
 if __name__ == '__main__':
     # Запускаем асинхронную основную функцию
     asyncio.run(main())
+
 
