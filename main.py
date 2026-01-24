@@ -3,7 +3,10 @@ import os
 import warnings
 import asyncio
 import threading
+import json
+import re
 from pathlib import Path
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.warnings import PTBUserWarning
@@ -12,9 +15,10 @@ from config import BOT_TOKEN, ADMIN_IDS, MINIAPP_URL
 from error_logger import setup_error_logging
 
 # Импорт для веб-сервера
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # Игнорировать предупреждения PTBUserWarning
@@ -39,220 +43,1156 @@ if not STATIC_DIR.exists():
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("📁 Создана папка 'static' для MiniApp")
 
-# Создаем базовый index.html, если его нет
+# Создаем файл index.html с новым кодом MiniApp
 INDEX_FILE = STATIC_DIR / "index.html"
-if not INDEX_FILE.exists():
-    with open(INDEX_FILE, "w", encoding="utf-8") as f:
-        f.write("""<!DOCTYPE html>
+with open(INDEX_FILE, "w", encoding="utf-8") as f:
+    f.write("""<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vovsetyagskie - MiniApp</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Во Все Тяжкие | Premium Hookah</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            min-height: 100vh;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #050505; color: #fff; min-height: 100vh; overflow-x: hidden; }
+        h1, h2, h3, .font-display { font-family: 'Playfair Display', serif; }
+
+        /* ===== LOADER ===== */
+        .loader-screen {
+            position: fixed;
+            inset: 0;
+            background: #050505;
+            z-index: 9999;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            transition: opacity 0.5s, visibility 0.5s;
+        }
+        .loader-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+        
+        .loader-logo { display: flex; gap: 8px; margin-bottom: 40px; }
+        .loader-box {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(135deg, #2d1b4e, #4c1d95);
+            border: 2px solid #a855f7;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            animation: boxPulse 1.5s ease-in-out infinite;
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.3);
+        }
+        .loader-box:nth-child(2) { animation-delay: 0.2s; }
+        .loader-box .number { position: absolute; top: 4px; left: 6px; font-size: 10px; color: #a855f7; font-weight: 600; }
+        .loader-box .symbol { font-size: 28px; font-weight: 700; color: #fff; }
+        .loader-box .weight { position: absolute; bottom: 4px; right: 6px; font-size: 8px; color: #a855f7; opacity: 0.7; }
+        
+        @keyframes boxPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(168, 85, 247, 0.3); }
+            50% { transform: scale(1.05); box-shadow: 0 0 50px rgba(168, 85, 247, 0.5); }
         }
         
-        .container {
-            max-width: 600px;
-            width: 100%;
-            text-align: center;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        .logo {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-        
-        h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-        
-        .subtitle {
-            font-size: 18px;
+        .loader-text {
+            font-family: 'Playfair Display', serif;
+            font-size: 14px;
+            color: #666;
+            letter-spacing: 4px;
+            text-transform: uppercase;
             margin-bottom: 30px;
-            opacity: 0.9;
         }
         
-        .status-box {
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 30px 0;
-            text-align: left;
+        .loader-progress { width: 200px; height: 2px; background: #1a1a1a; border-radius: 1px; overflow: hidden; }
+        .loader-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #a855f7, #7c3aed);
+            width: 0%;
+            animation: loading 2s ease-out forwards;
+            box-shadow: 0 0 10px #a855f7;
         }
-        
-        .features {
-            text-align: left;
-            margin: 20px 0;
+        @keyframes loading { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 100%; } }
+
+        /* ===== MAIN APP ===== */
+        .app { display: none; }
+        .app.visible { display: block; animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* ===== VARIABLES ===== */
+        :root {
+            --primary: #a855f7;
+            --primary-dark: #7c3aed;
+            --primary-glow: rgba(168, 85, 247, 0.15);
+            --bg: #050505;
+            --bg-card: rgba(255, 255, 255, 0.03);
+            --bg-card-hover: rgba(255, 255, 255, 0.06);
+            --border: rgba(255, 255, 255, 0.06);
+            --text: #ffffff;
+            --text-secondary: #888888;
+            --text-muted: #555555;
         }
-        
-        .feature {
+
+        /* ===== HEADER ===== */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(5, 5, 5, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+        }
+        .header-content {
             display: flex;
             align-items: center;
-            margin: 15px 0;
-            font-size: 16px;
+            justify-content: space-between;
+            max-width: 600px;
+            margin: 0 auto;
         }
-        
-        .feature-icon {
-            font-size: 24px;
-            margin-right: 15px;
-            width: 40px;
-        }
-        
-        .button {
-            background: white;
-            color: #667eea;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            font-weight: 600;
-            border-radius: 50px;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: all 0.3s ease;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-        }
-        
-        .telegram-info {
-            margin-top: 30px;
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-boxes { display: flex; gap: 4px; }
+        .logo-box {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #2d1b4e, #4c1d95);
+            border: 1.5px solid var(--primary);
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
             font-size: 14px;
-            opacity: 0.8;
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
         }
+        .logo-text h1 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            text-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+        }
+        .logo-text span { font-size: 10px; color: var(--text-muted); letter-spacing: 2px; text-transform: uppercase; }
+
+        .header-btn {
+            width: 44px;
+            height: 44px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .header-btn:hover { background: var(--bg-card-hover); border-color: var(--primary); }
+
+        /* ===== CONTAINER ===== */
+        .container { max-width: 600px; margin: 0 auto; padding: 0 20px 120px; }
+
+        /* ===== HERO ===== */
+        .hero { text-align: center; padding: 40px 0; position: relative; }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--primary-glow);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 50px;
+            font-size: 12px;
+            color: var(--primary);
+            margin-bottom: 24px;
+        }
+        .hero-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .hero h2 { font-size: 32px; font-weight: 600; margin-bottom: 12px; line-height: 1.2; }
+        .hero h2 span {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero p { color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
+
+        /* ===== STATS ===== */
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 32px 0; }
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px 16px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .stat-card:hover { border-color: rgba(168, 85, 247, 0.3); background: var(--bg-card-hover); }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary);
+            text-shadow: 0 0 30px rgba(168, 85, 247, 0.5);
+            margin-bottom: 4px;
+        }
+        .stat-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* ===== CATEGORIES ===== */
+        .categories-section { margin: 32px 0; }
+        .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .section-title { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .section-title span {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .categories-scroll {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 4px 0;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .categories-scroll::-webkit-scrollbar { display: none; }
+        
+        .category-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 50px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .category-chip:hover { border-color: rgba(168, 85, 247, 0.3); color: var(--text); }
+        .category-chip.active {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-color: transparent;
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3);
+        }
+        .category-chip .icon { font-size: 16px; }
+
+        /* ===== MENU GRID ===== */
+        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 20px; }
+        
+        .menu-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .menu-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(168, 85, 247, 0.3);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        .menu-card:active { transform: scale(0.98); }
+        
+        .menu-card-image {
+            height: 140px;
+            background: linear-gradient(135deg, rgba(76, 29, 149, 0.3), rgba(45, 27, 78, 0.5));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            position: relative;
+        }
+        .menu-card-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-hit { background: rgba(168, 85, 247, 0.2); color: var(--primary); }
+        .badge-premium { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+        .badge-vip { background: rgba(234, 179, 8, 0.2); color: #eab308; }
+        .badge-signature { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .badge-hot { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        
+        .menu-card-content { padding: 16px; }
+        .menu-card-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+        .menu-card-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        
+        .menu-card-footer { display: flex; align-items: center; justify-content: space-between; }
+        .menu-card-price { font-size: 18px; font-weight: 700; color: var(--primary); }
+        .menu-card-price .old { font-size: 12px; color: var(--text-muted); text-decoration: line-through; margin-left: 6px; font-weight: 400; }
+
+        /* ===== FEATURES ===== */
+        .features { margin: 48px 0; }
+        .feature-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            margin-bottom: 12px;
+            transition: all 0.3s;
+        }
+        .feature-card:hover { border-color: rgba(168, 85, 247, 0.2); }
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--primary-glow);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .feature-content h4 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .feature-content p { font-size: 13px; color: var(--text-muted); line-height: 1.4; }
+
+        /* ===== CONTACTS ===== */
+        .contacts-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            margin: 32px 0;
+        }
+        .contact-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .contact-item:last-child { border-bottom: none; }
+        .contact-item:hover { background: var(--bg-card-hover); }
+        .contact-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--primary-glow);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        .contact-info { flex: 1; }
+        .contact-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .contact-value { font-size: 15px; font-weight: 500; }
+        .contact-arrow { color: var(--text-muted); font-size: 18px; }
+
+        /* ===== SCHEDULE CARD ===== */
+        .schedule-card {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(76, 29, 149, 0.2));
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 20px;
+            padding: 24px;
+            margin: 32px 0;
+        }
+        .schedule-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .schedule-header-icon { font-size: 28px; }
+        .schedule-header h4 { font-size: 16px; font-weight: 600; }
+        .schedule-header p { font-size: 12px; color: var(--text-muted); }
+        .schedule-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .schedule-item { background: rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 16px; text-align: center; }
+        .schedule-days { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+        .schedule-time { font-size: 16px; font-weight: 700; color: var(--primary); }
+
+        /* ===== CTA BUTTON ===== */
+        .cta-section { margin: 32px 0; }
+        .cta-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border: none;
+            border-radius: 16px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 8px 30px rgba(168, 85, 247, 0.3);
+        }
+        .cta-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(168, 85, 247, 0.4); }
+        .cta-btn:active { transform: scale(0.98); }
+        .cta-btn .icon { font-size: 20px; }
+
+        /* ===== BOTTOM NAV ===== */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border);
+            padding: 12px 0;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            z-index: 100;
+        }
+        .bottom-nav-content { display: flex; justify-content: space-around; max-width: 400px; margin: 0 auto; }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 20px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-radius: 12px;
+        }
+        .nav-item .icon { font-size: 22px; transition: all 0.3s; }
+        .nav-item.active { color: var(--primary); }
+        .nav-item.active .icon { transform: scale(1.1); text-shadow: 0 0 20px rgba(168, 85, 247, 0.5); }
+
+        /* ===== SECTIONS ===== */
+        .section { display: none; }
+        .section.active { display: block; animation: sectionFade 0.4s ease; }
+        @keyframes sectionFade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ===== BOOKING ===== */
+        .booking-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 28px;
+        }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .form-input {
+            width: 100%;
+            padding: 16px 18px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s;
+        }
+        .form-input:focus { border-color: var(--primary); background: rgba(168, 85, 247, 0.03); }
+        .form-input::placeholder { color: var(--text-muted); }
+        select.form-input { cursor: pointer; }
+        select.form-input option { background: #0a0a0a; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        
+        .submit-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border: none;
+            border-radius: 14px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 8px;
+        }
+        .submit-btn:hover { box-shadow: 0 8px 30px rgba(168, 85, 247, 0.4); }
+
+        /* ===== GALLERY ===== */
+        .gallery-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .gallery-item {
+            aspect-ratio: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .gallery-item:hover { transform: scale(1.05); border-color: rgba(168, 85, 247, 0.3); }
+        
+        .review-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .review-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+        .review-avatar {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        .review-info { flex: 1; }
+        .review-name { font-weight: 600; margin-bottom: 2px; }
+        .review-date { font-size: 12px; color: var(--text-muted); }
+        .review-stars { color: #eab308; letter-spacing: 2px; }
+        .review-text { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+
+        /* ===== PROFILE ===== */
+        .profile-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(168, 85, 247, 0.2);
+            border-radius: 24px;
+            padding: 40px 24px;
+            text-align: center;
+        }
+        .profile-avatar {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            margin: 0 auto 20px;
+            box-shadow: 0 8px 40px rgba(168, 85, 247, 0.3);
+        }
+        .profile-name { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+        .profile-username { color: var(--text-muted); font-size: 14px; }
+
+        /* ===== TOAST ===== */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: rgba(76, 29, 149, 0.95);
+            border: 1px solid var(--primary);
+            padding: 16px 28px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 3000;
+            transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            box-shadow: 0 10px 40px rgba(168, 85, 247, 0.2);
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast-icon { font-size: 20px; }
+        .toast-message { font-weight: 500; }
+
+        /* ===== MODAL ===== */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 2000;
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #0a0a0a;
+            border: 1px solid var(--border);
+            border-bottom: none;
+            border-radius: 28px 28px 0 0;
+            width: 100%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: all 0.3s;
+        }
+        .modal-overlay.active .modal { transform: translateY(0); }
+        .modal-handle { width: 48px; height: 4px; background: var(--text-muted); border-radius: 2px; margin: 0 auto 24px; }
+        .modal-image {
+            height: 200px;
+            background: linear-gradient(135deg, rgba(76, 29, 149, 0.3), rgba(45, 27, 78, 0.5));
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 72px;
+            margin-bottom: 24px;
+        }
+        .modal-title { font-size: 26px; font-weight: 700; margin-bottom: 8px; }
+        .modal-desc { color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+        .modal-price { font-size: 32px; font-weight: 700; color: var(--primary); margin-bottom: 24px; }
+        .modal-close-btn {
+            width: 100%;
+            padding: 18px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .modal-close-btn:hover { border-color: var(--primary); }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">🍽️</div>
-        <h1>Vovsetyagskie</h1>
-        <p class="subtitle">Телеграм мини-приложение ресторана</p>
-        
-        <div class="status-box">
-            <h3>📱 Статус приложения</h3>
-            <div id="status">Инициализация...</div>
-        </div>
-        
-        <div class="features">
-            <div class="feature">
-                <span class="feature-icon">🍽️</span>
-                <span>Просмотр меню с актуальными ценами</span>
+    <!-- LOADER -->
+    <div class="loader-screen" id="loader">
+        <div class="loader-logo">
+            <div class="loader-box">
+                <span class="number">74</span>
+                <span class="symbol">Во</span>
+                <span class="weight">183.8</span>
             </div>
-            <div class="feature">
-                <span class="feature-icon">📅</span>
-                <span>Бронирование столов онлайн</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">💰</span>
-                <span>Баланс бонусных баллов</span>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">📋</span>
-                <span>История заказов и бронирований</span>
+            <div class="loader-box">
+                <span class="number">52</span>
+                <span class="symbol">Т</span>
+                <span class="weight">127.6</span>
             </div>
         </div>
-        
-        <button class="button" onclick="openInTelegram()">Открыть в Telegram</button>
-        
-        <div class="telegram-info">
-            ⚡ Это приложение оптимизировано для Telegram WebApp
+        <p class="loader-text">Premium Hookah</p>
+        <div class="loader-progress">
+            <div class="loader-progress-bar"></div>
         </div>
     </div>
-    
+
+    <!-- MAIN APP -->
+    <div class="app" id="app">
+        <!-- Toast -->
+        <div class="toast" id="toast">
+            <span class="toast-icon">✓</span>
+            <span class="toast-message">Сообщение</span>
+        </div>
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-boxes">
+                        <div class="logo-box">Во</div>
+                        <div class="logo-box">Т</div>
+                    </div>
+                    <div class="logo-text">
+                        <h1>Во Все Тяжкие</h1>
+                        <span>Premium Hookah</span>
+                    </div>
+                </div>
+                <button class="header-btn" onclick="openLink('tel:+79991234567')">📞</button>
+            </div>
+        </header>
+
+        <div class="container">
+            <!-- MENU SECTION -->
+            <section class="section active" id="section-menu">
+                <!-- Hero -->
+                <div class="hero">
+                    <div class="hero-badge">Мы открыты до 02:00</div>
+                    <h2 class="font-display">Искусство <span>кальяна</span></h2>
+                    <p>Погрузитесь в атмосферу премиального отдыха с авторскими миксами</p>
+                </div>
+
+                <!-- Stats -->
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value">50+</div>
+                        <div class="stat-label">Вкусов</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">5</div>
+                        <div class="stat-label">Лет опыта</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">10K</div>
+                        <div class="stat-label">Гостей</div>
+                    </div>
+                </div>
+
+                <!-- CTA -->
+                <div class="cta-section">
+                    <button class="cta-btn" onclick="showSection('booking')">
+                        <span class="icon">📅</span>
+                        Забронировать столик
+                    </button>
+                </div>
+
+                <!-- Categories -->
+                <div class="categories-section">
+                    <div class="section-header">
+                        <h3 class="section-title">Наше <span>меню</span></h3>
+                    </div>
+                    <div class="categories-scroll">
+                        <button class="category-chip active" onclick="filterMenu('all', this)">
+                            <span class="icon">✨</span> Всё меню
+                        </button>
+                        <button class="category-chip" onclick="filterMenu('hookah', this)">
+                            <span class="icon">💨</span> Кальяны
+                        </button>
+                        <button class="category-chip" onclick="filterMenu('signature', this)">
+                            <span class="icon">⚗️</span> Авторские
+                        </button>
+                        <button class="category-chip" onclick="filterMenu('drinks', this)">
+                            <span class="icon">🍹</span> Напитки
+                        </button>
+                        <button class="category-chip" onclick="filterMenu('food', this)">
+                            <span class="icon">🍕</span> Кухня
+                        </button>
+                    </div>
+                    <div class="menu-grid" id="menuGrid"></div>
+                </div>
+
+                <!-- Features -->
+                <div class="features">
+                    <div class="section-header">
+                        <h3 class="section-title">Почему <span>мы</span></h3>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🌿</div>
+                        <div class="feature-content">
+                            <h4>Премиум табаки</h4>
+                            <p>Tangiers, Darkside, MustHave, Element — только лучшие бренды</p>
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">👨‍🔬</div>
+                        <div class="feature-content">
+                            <h4>Мастера своего дела</h4>
+                            <p>Наши кальянщики — настоящие алхимики с 5+ лет опыта</p>
+                        </div>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon">🛋️</div>
+                        <div class="feature-content">
+                            <h4>VIP атмосфера</h4>
+                            <p>Приватные комнаты и уютные зоны для вашего комфорта</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Contacts -->
+                <div class="section-header">
+                    <h3 class="section-title">📍 <span>Контакты</span></h3>
+                </div>
+                <div class="contacts-card">
+                    <div class="contact-item" onclick="openLink('https://maps.google.com/?q=Москва+Химическая+52')">
+                        <div class="contact-icon">📍</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Адрес</div>
+                            <div class="contact-value">ул. Химическая, 52</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" onclick="openLink('tel:+79991234567')">
+                        <div class="contact-icon">📞</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Телефон</div>
+                            <div class="contact-value">+7 (999) 123-45-67</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" onclick="openLink('https://instagram.com/vovseTyajkie')">
+                        <div class="contact-icon">📸</div>
+                        <div class="contact-info">
+                            <div class="contact-label">Instagram</div>
+                            <div class="contact-value">@vovseTyajkie</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                </div>
+
+                <!-- Schedule -->
+                <div class="schedule-card">
+                    <div class="schedule-header">
+                        <span class="schedule-header-icon">🕐</span>
+                        <div>
+                            <h4>Время работы</h4>
+                            <p>Ждём вас каждый день</p>
+                        </div>
+                    </div>
+                    <div class="schedule-grid">
+                        <div class="schedule-item">
+                            <div class="schedule-days">Пн — Чт</div>
+                            <div class="schedule-time">14:00 — 02:00</div>
+                        </div>
+                        <div class="schedule-item">
+                            <div class="schedule-days">Пт — Вс</div>
+                            <div class="schedule-time">14:00 — 04:00</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- BOOKING SECTION -->
+            <section class="section" id="section-booking">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">📅 <span>Бронирование</span></h3>
+                </div>
+                <div class="booking-card">
+                    <div class="form-group">
+                        <label class="form-label">Ваше имя</label>
+                        <input type="text" class="form-input" id="bookingName" placeholder="Введите имя">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Телефон</label>
+                        <input type="tel" class="form-input" id="bookingPhone" placeholder="+7 (___) ___-__-__">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Дата</label>
+                            <input type="date" class="form-input" id="bookingDate">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Время</label>
+                            <select class="form-input" id="bookingTime">
+                                <option value="14:00">14:00</option>
+                                <option value="15:00">15:00</option>
+                                <option value="16:00">16:00</option>
+                                <option value="17:00">17:00</option>
+                                <option value="18:00" selected>18:00</option>
+                                <option value="19:00">19:00</option>
+                                <option value="20:00">20:00</option>
+                                <option value="21:00">21:00</option>
+                                <option value="22:00">22:00</option>
+                                <option value="23:00">23:00</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Количество гостей</label>
+                        <select class="form-input" id="bookingGuests">
+                            <option value="1-2">1-2 человека</option>
+                            <option value="3-4">3-4 человека</option>
+                            <option value="5-6">5-6 человек</option>
+                            <option value="7+">7+ человек (VIP)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Пожелания</label>
+                        <input type="text" class="form-input" id="bookingComment" placeholder="Особые пожелания...">
+                    </div>
+                    <button class="submit-btn" onclick="submitBooking()">Забронировать столик</button>
+                </div>
+            </section>
+
+            <!-- GALLERY SECTION -->
+            <section class="section" id="section-gallery">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">📸 <span>Галерея</span></h3>
+                </div>
+                <div class="gallery-grid">
+                    <div class="gallery-item">🧪</div>
+                    <div class="gallery-item">💨</div>
+                    <div class="gallery-item">🛋️</div>
+                    <div class="gallery-item">🍹</div>
+                    <div class="gallery-item">🔥</div>
+                    <div class="gallery-item">⚗️</div>
+                </div>
+
+                <div class="section-header" style="margin: 32px 0 16px;">
+                    <h3 class="section-title">⭐ <span>Отзывы</span></h3>
+                </div>
+                <div class="review-card">
+                    <div class="review-header">
+                        <div class="review-avatar">А</div>
+                        <div class="review-info">
+                            <div class="review-name">Александр</div>
+                            <div class="review-date">2 дня назад</div>
+                        </div>
+                        <div class="review-stars">★★★★★</div>
+                    </div>
+                    <p class="review-text">Лучшая кальянная в городе! Атмосфера невероятная, а микс Heisenberg — это что-то особенное 🔥</p>
+                </div>
+                <div class="review-card">
+                    <div class="review-header">
+                        <div class="review-avatar">М</div>
+                        <div class="review-info">
+                            <div class="review-name">Мария</div>
+                            <div class="review-date">Неделю назад</div>
+                        </div>
+                        <div class="review-stars">★★★★★</div>
+                    </div>
+                    <p class="review-text">Были с подругами на девичнике — всё прошло идеально! Персонал очень внимательный 💨</p>
+                </div>
+                <div class="review-card">
+                    <div class="review-header">
+                        <div class="review-avatar">Д</div>
+                        <div class="review-info">
+                            <div class="review-name">Дмитрий</div>
+                            <div class="review-date">2 недели назад</div>
+                        </div>
+                        <div class="review-stars">★★★★★</div>
+                    </div>
+                    <p class="review-text">Отличное место для отдыха. Премиальные табаки, уютная атмосфера. Рекомендую!</p>
+                </div>
+            </section>
+
+            <!-- PROFILE SECTION -->
+            <section class="section" id="section-profile">
+                <div class="section-header" style="margin: 24px 0 16px;">
+                    <h3 class="section-title">👤 <span>Профиль</span></h3>
+                </div>
+                <div class="profile-card">
+                    <div class="profile-avatar" id="profileAvatar">👤</div>
+                    <div class="profile-name" id="profileName">Гость</div>
+                    <div class="profile-username" id="profileUsername"></div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="contacts-card" style="margin-top: 20px;">
+                    <div class="contact-item" onclick="showSection('booking')">
+                        <div class="contact-icon">📅</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Забронировать столик</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" onclick="openLink('tel:+79991234567')">
+                        <div class="contact-icon">📞</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Позвонить нам</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                    <div class="contact-item" onclick="openLink('https://instagram.com/vovseTyajkie')">
+                        <div class="contact-icon">📸</div>
+                        <div class="contact-info">
+                            <div class="contact-value">Instagram</div>
+                        </div>
+                        <span class="contact-arrow">→</span>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <nav class="bottom-nav">
+            <div class="bottom-nav-content">
+                <button class="nav-item active" onclick="showSection('menu')">
+                    <span class="icon">🏠</span>
+                    <span>Меню</span>
+                </button>
+                <button class="nav-item" onclick="showSection('booking')">
+                    <span class="icon">📅</span>
+                    <span>Бронь</span>
+                </button>
+                <button class="nav-item" onclick="showSection('gallery')">
+                    <span class="icon">📸</span>
+                    <span>Галерея</span>
+                </button>
+                <button class="nav-item" onclick="showSection('profile')">
+                    <span class="icon">👤</span>
+                    <span>Профиль</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Product Modal -->
+        <div class="modal-overlay" id="productModal" onclick="closeModal(event)">
+            <div class="modal" onclick="event.stopPropagation()">
+                <div class="modal-handle"></div>
+                <div class="modal-image" id="modalImage">💨</div>
+                <h3 class="modal-title" id="modalTitle">Название</h3>
+                <p class="modal-desc" id="modalDesc">Описание товара</p>
+                <div class="modal-price" id="modalPrice">0₽</div>
+                <button class="modal-close-btn" onclick="document.getElementById('productModal').classList.remove('active')">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-        // Инициализация Telegram Web App
-        const tg = window.Telegram.WebApp;
+        const tg = window.Telegram?.WebApp;
         
-        // Функция обновления статуса
-        function updateStatus() {
-            const statusElement = document.getElementById('status');
-            
-            if (tg.initDataUnsafe.user) {
-                const user = tg.initDataUnsafe.user;
-                statusElement.innerHTML = `
-                    ✅ Приложение загружено<br>
-                    👤 Пользователь: ${user.first_name}${user.last_name ? ' ' + user.last_name : ''}<br>
-                    📱 Платформа: ${tg.platform}<br>
-                    🆔 ID: ${user.id}
-                `;
-                
-                // Расширяем на весь экран
-                tg.expand();
-                
-                // Уведомляем Telegram, что приложение готово
+        // Menu Data
+        const menuItems = [
+            {id:1, name:'Классический', desc:'Один вкус премиум табака на выбор. Идеален для начинающих', price:1200, oldPrice:1500, category:'hookah', icon:'💨', badge:'hit'},
+            {id:2, name:'Premium', desc:'Tangiers, Darkside, Element — топовые табаки мира', price:1800, category:'hookah', icon:'🔮', badge:'premium'},
+            {id:3, name:'VIP Кальян', desc:'Эксклюзивные табаки + фрукты + авторская подача', price:2500, category:'hookah', icon:'👑', badge:'vip'},
+            {id:4, name:'Blue Crystal', desc:'Ледяная свежесть с нотками мяты и цитруса', price:2000, category:'signature', icon:'🧊', badge:'hit'},
+            {id:5, name:'Heisenberg', desc:'Секретный рецепт шефа. 99.1% чистого наслаждения', price:2200, category:'signature', icon:'⚗️', badge:'signature'},
+            {id:6, name:'Los Pollos', desc:'Пряный микс с перцем и тропическими фруктами', price:2000, category:'signature', icon:'🔥', badge:'hot'},
+            {id:7, name:'Чай (чайник)', desc:'Чёрный, зелёный, фруктовый или травяной', price:400, category:'drinks', icon:'🍵'},
+            {id:8, name:'Лимонады', desc:'Клубничный, цитрусовый, мохито, манго', price:350, category:'drinks', icon:'🍹'},
+            {id:9, name:'Кофе', desc:'Эспрессо, американо, капучино, латте, раф', price:250, category:'drinks', icon:'☕'},
+            {id:10, name:'Пицца', desc:'Маргарита, Пепперони, 4 сыра, BBQ курица', price:650, category:'food', icon:'🍕'},
+            {id:11, name:'Салаты', desc:'Цезарь, Греческий, с креветками', price:450, category:'food', icon:'🥗'},
+            {id:12, name:'Закуски', desc:'Картофель фри, наггетсы, сырные палочки', price:350, category:'food', icon:'🍟'}
+        ];
+
+        let currentProduct = null;
+
+        // Initialize
+        function init() {
+            setTimeout(() => {
+                document.getElementById('loader').classList.add('hidden');
+                document.getElementById('app').classList.add('visible');
+            }, 2000);
+
+            if (tg) {
                 tg.ready();
-                
-                console.log('✅ Telegram WebApp инициализирован');
-                console.log('Пользователь:', user);
-            } else {
-                statusElement.innerHTML = `
-                    ⚠️ Приложение запущено в браузере<br>
-                    Для полного функционала откройте через Telegram бота
-                `;
+                tg.expand();
+                if (tg.initDataUnsafe?.user) {
+                    const u = tg.initDataUnsafe.user;
+                    document.getElementById('profileName').textContent = u.first_name || 'Гость';
+                    document.getElementById('profileUsername').textContent = u.username ? '@' + u.username : '';
+                    document.getElementById('profileAvatar').textContent = (u.first_name || 'Г')[0];
+                }
+            }
+            
+            document.getElementById('bookingDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('bookingDate').min = new Date().toISOString().split('T')[0];
+            renderMenu(menuItems);
+        }
+
+        // Render Menu
+        function renderMenu(items) {
+            const badgeLabels = {hit:'Хит', premium:'Premium', vip:'VIP', signature:'Авторский', hot:'Острое'};
+            document.getElementById('menuGrid').innerHTML = items.map(i => `
+                <div class="menu-card" data-category="${i.category}" onclick="openProduct(${i.id})">
+                    <div class="menu-card-image">
+                        ${i.badge ? `<span class="menu-card-badge badge-${i.badge}">${badgeLabels[i.badge]}</span>` : ''}
+                        ${i.icon}
+                    </div>
+                    <div class="menu-card-content">
+                        <h4 class="menu-card-title">${i.name}</h4>
+                        <p class="menu-card-desc">${i.desc}</p>
+                        <div class="menu-card-footer">
+                            <span class="menu-card-price">${i.price}₽${i.oldPrice ? `<span class="old">${i.oldPrice}₽</span>` : ''}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Filter Menu
+        function filterMenu(category, btn) {
+            document.querySelectorAll('.category-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const filtered = category === 'all' ? menuItems : menuItems.filter(i => i.category === category);
+            renderMenu(filtered);
+            haptic();
+        }
+
+        // Product Modal
+        function openProduct(id) {
+            currentProduct = menuItems.find(i => i.id === id);
+            if (!currentProduct) return;
+            document.getElementById('modalImage').textContent = currentProduct.icon;
+            document.getElementById('modalTitle').textContent = currentProduct.name;
+            document.getElementById('modalDesc').textContent = currentProduct.desc;
+            document.getElementById('modalPrice').textContent = currentProduct.price + '₽';
+            document.getElementById('productModal').classList.add('active');
+            haptic();
+        }
+
+        function closeModal(e) {
+            if (e.target.id === 'productModal') {
+                document.getElementById('productModal').classList.remove('active');
             }
         }
-        
-        // Функция для открытия в Telegram
-        function openInTelegram() {
-            if (tg.platform !== 'unknown') {
-                // Уже в Telegram
-                tg.showAlert('Вы уже в Telegram приложении!');
-            } else {
-                // Открыть в Telegram
-                const botUsername = 'vovsetyagskie_bot'; // Замените на username вашего бота
-                const webAppUrl = window.location.href;
-                window.open(`https://t.me/${botUsername}?start=webapp`, '_blank');
+
+        // Booking
+        function submitBooking() {
+            const name = document.getElementById('bookingName').value.trim();
+            const phone = document.getElementById('bookingPhone').value.trim();
+            
+            if (!name || !phone) {
+                showToast('Заполните имя и телефон');
+                return;
             }
+            
+            const data = {
+                type: 'booking',
+                name,
+                phone,
+                date: document.getElementById('bookingDate').value,
+                time: document.getElementById('bookingTime').value,
+                guests: document.getElementById('bookingGuests').value,
+                comment: document.getElementById('bookingComment').value
+            };
+            
+            if (tg) {
+                tg.sendData(JSON.stringify(data));
+            }
+            
+            showToast('Заявка отправлена! Мы перезвоним ✓');
+            document.getElementById('bookingName').value = '';
+            document.getElementById('bookingPhone').value = '';
+            document.getElementById('bookingComment').value = '';
+            haptic();
         }
-        
-        // Обновляем статус при загрузке
-        document.addEventListener('DOMContentLoaded', updateStatus);
-        
-        // Также обновляем статус, если Telegram WebApp загрузится позже
-        if (tg.initDataUnsafe) {
-            updateStatus();
+
+        // Navigation
+        function showSection(id) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById('section-' + id).classList.add('active');
+            const navIndex = {menu: 0, booking: 1, gallery: 2, profile: 3};
+            document.querySelectorAll('.nav-item')[navIndex[id]]?.classList.add('active');
+            window.scrollTo({top: 0, behavior: 'smooth'});
+            haptic();
         }
-        
-        // Для отладки
-        console.log('🚀 MiniApp запущен!');
-        console.log('Telegram WebApp:', tg);
-        console.log('User data:', tg.initDataUnsafe.user);
+
+        // Helpers
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.querySelector('.toast-message').textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function haptic() {
+            if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        }
+
+        function openLink(url) {
+            window.open(url, '_blank');
+        }
+
+        // Start
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>""")
-    logger.info("📄 Создан index.html в папке static")
+logger.info("📄 Создан новый index.html с расширенным функционалом")
 
 # Создаем FastAPI приложение для MiniApp
 web_app = FastAPI(title="Vovsetyagskie MiniApp")
+
+# Настройка CORS для работы с Telegram
+web_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Настраиваем раздачу статики
 web_app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -263,10 +1203,190 @@ async def serve_miniapp():
     """Основной маршрут для MiniApp"""
     return FileResponse("static/index.html")
 
+# API для получения данных пользователя
+@web_app.get("/api/user/{user_id}")
+async def get_user_data(user_id: int):
+    """Получение данных пользователя"""
+    try:
+        from database import Database
+        db = Database()
+        user = db.get_user(user_id)
+        
+        if user:
+            return JSONResponse({
+                "status": "success",
+                "data": {
+                    "id": user[0],
+                    "user_id": user[1],
+                    "username": user[2],
+                    "first_name": user[3],
+                    "phone": user[4],
+                    "balance": user[7],
+                    "total_spent": user[8]
+                }
+            })
+        else:
+            return JSONResponse({
+                "status": "error",
+                "message": "User not found"
+            }, status_code=404)
+    except Exception as e:
+        logger.error(f"Ошибка получения данных пользователя: {e}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(e)
+        }, status_code=500)
+
+# API для создания бронирования
+@web_app.post("/api/booking")
+async def create_booking(request: Request):
+    """Создание бронирования через API"""
+    try:
+        data = await request.json()
+        
+        # Валидация данных
+        required_fields = ["user_id", "name", "phone", "date", "time", "guests"]
+        for field in required_fields:
+            if field not in data:
+                return JSONResponse({
+                    "status": "error",
+                    "message": f"Missing required field: {field}"
+                }, status_code=400)
+        
+        from database import Database
+        db = Database()
+        
+        # Преобразуем количество гостей
+        guests_str = data["guests"]
+        if "-" in guests_str:
+            guests_num = int(guests_str.split("-")[-1].replace("+", "").strip())
+        elif "+" in guests_str:
+            guests_num = int(guests_str.replace("+", "").strip())
+        else:
+            guests_num = int(guests_str)
+        
+        # Создаем бронирование
+        booking_id = db.create_booking(
+            user_id=data["user_id"],
+            booking_date=data["date"],
+            booking_time=data["time"],
+            guests=guests_num,
+            comment=data.get("comment", ""),
+            status="pending"
+        )
+        
+        if booking_id:
+            # Уведомляем администраторов
+            from config import ADMIN_IDS
+            try:
+                # Импортируем здесь, чтобы избежать циклических импортов
+                import asyncio
+                from telegram import Bot
+                
+                bot = Bot(token=BOT_TOKEN)
+                for admin_id in ADMIN_IDS:
+                    try:
+                        await bot.send_message(
+                            chat_id=admin_id,
+                            text=f"🆕 Новая бронь из MiniApp!\n"
+                                 f"👤 Пользователь: {data['name']}\n"
+                                 f"📞 Телефон: {data['phone']}\n"
+                                 f"📅 Дата: {data['date']}\n"
+                                 f"⏰ Время: {data['time']}\n"
+                                 f"👥 Гостей: {guests_num}\n"
+                                 f"💬 Комментарий: {data.get('comment', 'Нет')}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Ошибка уведомления админа {admin_id}: {e}")
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомлений: {e}")
+            
+            return JSONResponse({
+                "status": "success",
+                "booking_id": booking_id,
+                "message": "Бронирование создано успешно"
+            })
+        else:
+            return JSONResponse({
+                "status": "error",
+                "message": "Ошибка создания бронирования"
+            }, status_code=500)
+            
+    except Exception as e:
+        logger.error(f"Ошибка создания бронирования: {e}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(e)
+        }, status_code=500)
+
+# API для получения меню
+@web_app.get("/api/menu")
+async def get_menu():
+    """Получение меню"""
+    try:
+        from database import Database
+        db = Database()
+        menu_items = db.get_all_menu_items()
+        
+        formatted_items = []
+        for item in menu_items:
+            formatted_items.append({
+                "id": item[0],
+                "name": item[1],
+                "description": item[2] or "",
+                "price": item[3],
+                "category": item[4] or "other",
+                "image_url": item[5] or "",
+                "is_available": bool(item[6]) if item[6] is not None else True
+            })
+        
+        return JSONResponse({
+            "status": "success",
+            "data": formatted_items
+        })
+    except Exception as e:
+        logger.error(f"Ошибка получения меню: {e}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(e)
+        }, status_code=500)
+
+# API для получения бронирований пользователя
+@web_app.get("/api/user/{user_id}/bookings")
+async def get_user_bookings(user_id: int):
+    """Получение бронирований пользователя"""
+    try:
+        from database import Database
+        db = Database()
+        bookings = db.get_user_bookings(user_id)
+        
+        formatted_bookings = []
+        for booking in bookings:
+            formatted_bookings.append({
+                "id": booking[0],
+                "date": booking[2],
+                "time": booking[3],
+                "guests": booking[4],
+                "comment": booking[5] or "",
+                "status": booking[6],
+                "created_at": booking[7]
+            })
+        
+        return JSONResponse({
+            "status": "success",
+            "data": formatted_bookings
+        })
+    except Exception as e:
+        logger.error(f"Ошибка получения бронирований: {e}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(e)
+        }, status_code=500)
+
 # Маршрут для проверки здоровья
 @web_app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "miniapp", "port": 3000}
+    return JSONResponse({"status": "ok", "service": "miniapp", "port": 3000})
 
 # Маршрут для favicon
 @web_app.get("/favicon.ico")
@@ -274,7 +1394,30 @@ async def favicon():
     favicon_path = Path("static/favicon.ico")
     if favicon_path.exists():
         return FileResponse("static/favicon.ico")
-    return {"status": "favicon not found"}
+    return JSONResponse({"status": "favicon not found"})
+
+# Маршрут для данных о заведении
+@web_app.get("/api/restaurant-info")
+async def restaurant_info():
+    """Информация о ресторане"""
+    return JSONResponse({
+        "status": "success",
+        "data": {
+            "name": "Во Все Тяжкие | Premium Hookah",
+            "address": "ул. Химическая, 52",
+            "phone": "+7 (999) 123-45-67",
+            "instagram": "@vovseTyajkie",
+            "working_hours": {
+                "weekdays": "14:00 — 02:00",
+                "weekends": "14:00 — 04:00"
+            },
+            "stats": {
+                "flavors": "50+",
+                "experience": "5",
+                "guests": "10K"
+            }
+        }
+    })
 
 def run_web_server():
     """Запуск веб-сервера в отдельном потоке"""
@@ -292,6 +1435,123 @@ def run_web_server():
         server.run()
     except Exception as e:
         logger.error(f"❌ Ошибка веб-сервера: {e}")
+
+# Функция для обработки данных из MiniApp
+async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик данных из WebApp"""
+    try:
+        if not update.effective_message or not update.effective_message.web_app_data:
+            return
+            
+        data = update.effective_message.web_app_data.data
+        user_id = update.effective_user.id
+        logger.info(f"📱 Данные от MiniApp от пользователя {user_id}: {data}")
+        
+        try:
+            parsed_data = json.loads(data)
+            
+            if parsed_data.get('type') == 'booking':
+                # Обработка бронирования
+                from database import Database
+                db = Database()
+                
+                # Получаем пользователя
+                user = db.get_user(user_id)
+                
+                # Обновляем данные пользователя, если они изменились
+                new_name = parsed_data.get('name', '').strip()
+                new_phone = parsed_data.get('phone', '').strip()
+                
+                if user:
+                    # user[3] - first_name, user[4] - phone
+                    if new_name and new_name != user[3]:
+                        db.update_user_name(user_id, new_name)
+                        logger.info(f"🔄 Обновлено имя пользователя {user_id}: {new_name}")
+                    
+                    if new_phone and new_phone != user[4]:
+                        db.update_user_phone(user_id, new_phone)
+                        logger.info(f"🔄 Обновлен телефон пользователя {user_id}: {new_phone}")
+                
+                # Преобразуем количество гостей
+                guests_str = parsed_data.get('guests', '1-2')
+                if "-" in guests_str:
+                    guests_num = int(guests_str.split("-")[-1].replace("+", "").strip())
+                elif "+" in guests_str:
+                    guests_num = int(guests_str.replace("+", "").strip())
+                else:
+                    guests_num = int(guests_str)
+                
+                # Создаем бронирование
+                booking_id = db.create_booking(
+                    user_id=user_id,
+                    booking_date=parsed_data.get('date'),
+                    booking_time=parsed_data.get('time'),
+                    guests=guests_num,
+                    comment=parsed_data.get('comment', ''),
+                    status='pending'
+                )
+                
+                if booking_id:
+                    # Отправляем подтверждение пользователю
+                    await update.effective_message.reply_text(
+                        "✅ **Бронирование создано!**\n\n"
+                        f"📅 Дата: {parsed_data.get('date')}\n"
+                        f"⏰ Время: {parsed_data.get('time')}\n"
+                        f"👥 Гостей: {guests_num}\n\n"
+                        "Мы свяжемся с вами для подтверждения. Спасибо!",
+                        parse_mode='Markdown'
+                    )
+                    
+                    # Уведомляем администраторов
+                    for admin_id in ADMIN_IDS:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=admin_id,
+                                text=f"🆕 НОВАЯ БРОНЬ ИЗ MINIAPP!\n\n"
+                                     f"👤 Пользователь: {new_name}\n"
+                                     f"📱 ID: {user_id}\n"
+                                     f"📞 Телефон: {new_phone}\n"
+                                     f"📅 Дата: {parsed_data.get('date')}\n"
+                                     f"⏰ Время: {parsed_data.get('time')}\n"
+                                     f"👥 Гостей: {guests_num}\n"
+                                     f"💬 Комментарий: {parsed_data.get('comment', 'нет')}\n\n"
+                                     f"ID брони: #{booking_id}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Ошибка уведомления админа {admin_id}: {e}")
+                    
+                    logger.info(f"✅ Бронирование #{booking_id} создано для пользователя {user_id}")
+                else:
+                    await update.effective_message.reply_text(
+                        "❌ Произошла ошибка при создании бронирования. Попробуйте позже."
+                    )
+            
+            elif parsed_data.get('type') == 'contact':
+                # Обработка запроса контактов
+                await update.effective_message.reply_text(
+                    "📞 **Контакты ресторана:**\n\n"
+                    "📍 Адрес: ул. Химическая, 52\n"
+                    "📱 Телефон: +7 (999) 123-45-67\n"
+                    "📸 Instagram: @vovseTyajkie\n\n"
+                    "🕐 **Время работы:**\n"
+                    "Пн-Чт: 14:00 — 02:00\n"
+                    "Пт-Вс: 14:00 — 04:00",
+                    parse_mode='Markdown'
+                )
+            
+            else:
+                logger.warning(f"Неизвестный тип данных от MiniApp: {parsed_data.get('type')}")
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"Ошибка декодирования JSON из MiniApp: {e}")
+            await update.effective_message.reply_text(
+                "❌ Ошибка обработки данных. Попробуйте еще раз."
+            )
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки данных от MiniApp: {e}", exc_info=True)
+
+# ... остальной код остается без изменений (post_init, post_stop, is_admin, фильтры и т.д.) ...
 
 async def post_init(application):
     """Функция, выполняемая после инициализации бота"""
@@ -362,93 +1622,39 @@ async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]])
     
     await update.message.reply_text(
-        "🌐 **Vovsetyagskie - Веб-приложение**\n\n"
+        "🌐 **Во Все Тяжкие | Premium Hookah**\n\n"
         "Откройте веб-приложение для удобного доступа к:\n"
+        "• 💨 Премиум кальянам\n"
+        "• 📅 Бронированию столиков\n"
         "• 🍽️ Меню с ценами\n"
-        "• 📅 Бронированию столов\n"
-        "• 💰 Вашему балансу баллов\n"
-        "• 📋 История бронирований\n\n"
+        "• 📸 Галерее заведения\n"
+        "• 👤 Вашему профилю\n\n"
         "Нажмите кнопку ниже, чтобы открыть:",
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
 
-# Упрощенные версии обработчиков (без удаления сообщений)
-
-async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик неизвестных сообщений"""
-    if update.message:
-        if is_admin(update.effective_user.id):
-            await update.message.reply_text(
-                "❌ Неизвестная команда. Используйте кнопки меню администратора."
-            )
-        else:
-            # Предлагаем открыть MiniApp или показать меню
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🌐 Открыть веб-приложение", callback_data="open_miniapp"),
-                InlineKeyboardButton("📋 Показать меню", callback_data="show_menu")
-            ]])
-            await update.message.reply_text(
-                "Я не понимаю эту команду. Хотите открыть веб-приложение или увидеть меню?",
-                reply_markup=keyboard
-            )
-
-async def handle_back_button(update: Update, context):
-    """Обработчик кнопки 'Назад' для обоих типов пользователей"""
-    user_id = update.effective_user.id
+# Команда для отладки MiniApp
+async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отладочная информация о MiniApp"""
+    if not is_admin(update.effective_user.id):
+        return
     
-    if is_admin(user_id):
-        from handlers.admin_utils import back_to_main_menu
-        await back_to_main_menu(update, context)
-    else:
-        from handlers.user_handlers import back_to_main
-        await back_to_main(update, context)
+    status_info = {
+        "web_server": "running" if threading.active_count() > 1 else "stopped",
+        "mini_app_url": MINIAPP_URL or "Не настроен",
+        "static_dir": str(STATIC_DIR.absolute()),
+        "index_file_exists": INDEX_FILE.exists(),
+        "port": 3000
+    }
+    
+    message = "🔧 **Отладка MiniApp**\n\n"
+    for key, value in status_info.items():
+        message += f"• {key}: `{value}`\n"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
 
-# Функции для отладки
-async def debug_shifts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для отладки - показать все смены"""
-    if not is_admin(update.effective_user.id):
-        return
-
-    from database import Database
-    db = Database()
-    all_shifts = db.get_all_shifts_debug()
-
-    if not all_shifts:
-        await update.message.reply_text("📭 Нет смен в базе данных")
-        return
-
-    message = "📊 ВСЕ СМЕНЫ В БАЗЕ:\n\n"
-    for shift in all_shifts:
-        message += f"Смена #{shift[1]} ({shift[2]})\n"
-        message += f"  Открыта: {shift[3]}\n"
-        message += f"  Закрыта: {shift[4] if shift[4] else 'Открыта'}\n"
-        message += f"  Выручка: {shift[5] or 0}₽\n"
-        message += f"  Заказов: {shift[6] or 0}\n"
-        message += f"  Статус: {shift[7]}\n"
-        message += "-" * 30 + "\n"
-
-    # Разбиваем сообщение если оно слишком длинное
-    if len(message) > 4000:
-        await update.message.reply_text(message[:4000])
-        if len(message) > 8000:
-            await update.message.reply_text(message[4000:8000])
-            if len(message) > 12000:
-                await update.message.reply_text(message[8000:12000])
-        else:
-            await update.message.reply_text(message[4000:])
-    else:
-        await update.message.reply_text(message)
-
-async def reset_shift_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сбросить данные смены в памяти"""
-    if not is_admin(update.effective_user.id):
-        return
-
-    # Сброс данных в памяти
-    context.bot_data.clear()
-
-    await update.message.reply_text("✅ Данные смены в памяти сброшены!")
+# ... остальной код остается без изменений ...
 
 def setup_handlers(application):
     """Настройка всех обработчиков"""
@@ -548,7 +1754,10 @@ def setup_handlers(application):
     application.add_handler(MessageHandler(filters.Regex("^🌐 Веб-приложение$") & user_filter, open_miniapp))
     application.add_handler(CallbackQueryHandler(open_miniapp, pattern="^open_miniapp$"))
     
-    # 2. Сначала добавляем ConversationHandler'ы
+    # 2. Обработчик данных из WebApp
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_miniapp_data))
+    
+    # 3. Сначала добавляем ConversationHandler'ы
     application.add_handler(get_user_message_handler())
     application.add_handler(get_broadcast_handler())
     application.add_handler(get_bonus_handler())
@@ -556,12 +1765,12 @@ def setup_handlers(application):
     application.add_handler(get_booking_cancellation_handler())
     application.add_handler(get_user_search_handler())
     
-    # 3. Обработчики управления меню
+    # 4. Обработчики управления меню
     menu_handlers = get_menu_management_handlers()
     for handler in menu_handlers:
         application.add_handler(handler)
 
-    # 4. ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ
+    # 5. ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ
     application.add_handler(MessageHandler(filters.Regex("^💰 Мой баланс$") & user_filter, show_balance))
     application.add_handler(MessageHandler(filters.Regex("^🎁 Реферальная программа$") & user_filter, show_referral_info))
     application.add_handler(MessageHandler(filters.Regex("^📋 Мои бронирования$") & user_filter, show_user_bookings))
@@ -590,7 +1799,7 @@ def setup_handlers(application):
     application.add_handler(get_spend_bonus_handler())
     application.add_handler(get_booking_handler())
 
-    # 5. ОБРАБОТЧИКИ АДМИНИСТРАТОРА
+    # 6. ОБРАБОТЧИКИ АДМИНИСТРАТОРА
     application.add_handler(MessageHandler(filters.Regex("^👥 Список пользователей$") & admin_filter, show_users_list))
     application.add_handler(MessageHandler(filters.Regex("^📊 Статистика$") & admin_filter, show_statistics))
     application.add_handler(MessageHandler(filters.Regex("^📋 Запросы на списание$") & admin_filter, handle_bonus_requests))
@@ -620,7 +1829,7 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(handle_booking_action, pattern="^(confirm_booking_|cancel_booking_)"))
     application.add_handler(CallbackQueryHandler(handle_bonus_request_action, pattern="^(approve_|reject_)"))
 
-    # 6. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
+    # 7. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
     application.add_handler(CallbackQueryHandler(handle_create_order, pattern="^create_order$"))
     application.add_handler(CallbackQueryHandler(handle_category_selection, pattern="^category_"))
     application.add_handler(CallbackQueryHandler(handle_item_selection, pattern="^item_"))
@@ -656,18 +1865,19 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(calculate_all_orders, pattern="^calculate_all_orders$"))
     application.add_handler(CallbackQueryHandler(show_shift_status, pattern="^shift_status$"))
 
-    # 7. КОМАНДЫ
+    # 8. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("reset_shift", reset_shift_data))
     application.add_handler(CommandHandler("debug_shifts", debug_shifts))
     application.add_handler(CommandHandler("webapp", open_miniapp))
+    application.add_handler(CommandHandler("debug_miniapp", debug_miniapp))  # Новая команда для отладки
 
-    # 8. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
+    # 9. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Назад$"), handle_back_button))
     application.add_handler(MessageHandler(filters.Regex("^⬅️ В главное меню$"), handle_back_button))
 
-    # 9. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
+    # 10. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unknown_message))
 
 def main():
@@ -707,11 +1917,12 @@ def main():
         if MINIAPP_URL:
             print(f"🌐 Внешний доступ: {MINIAPP_URL}")
         else:
-            print("⚠️  MiniApp не настроен. Настройте MINIAPP_URL в config.py")
+            print("⚠️  MiniApp URL не настроен. Настройте MINIAPP_URL в config.py")
+        print("🔧 Отладка MiniApp: /debug_miniapp")
         print("=" * 50)
 
         application.run_polling(
-            allowed_updates=['message', 'callback_query'],
+            allowed_updates=['message', 'callback_query', 'web_app_data'],
             timeout=60,
             drop_pending_updates=True,
             poll_interval=0.5
