@@ -2,6 +2,7 @@ import logging
 import os
 import warnings
 import asyncio
+import threading
 from pathlib import Path
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -270,33 +271,27 @@ async def health_check():
 # Маршрут для favicon
 @web_app.get("/favicon.ico")
 async def favicon():
-    return FileResponse("static/favicon.ico")
+    favicon_path = Path("static/favicon.ico")
+    if favicon_path.exists():
+        return FileResponse("static/favicon.ico")
+    return {"status": "favicon not found"}
 
-# Создаем favicon.ico если его нет
-FAVICON_FILE = STATIC_DIR / "favicon.ico"
-if not FAVICON_FILE.exists():
-    # Создаем простой favicon
-    from PIL import Image, ImageDraw
-    img = Image.new('RGB', (64, 64), color=(102, 126, 234))
-    draw = ImageDraw.Draw(img)
-    draw.text((20, 20), "V", fill=(255, 255, 255))
-    img.save(FAVICON_FILE, "ICO")
-    logger.info("🎨 Создан favicon.ico")
-
-# Функция для запуска веб-сервера
-async def run_web_server():
-    """Запуск веб-сервера для MiniApp на порту 3000"""
-    config = uvicorn.Config(
-        web_app, 
-        host="0.0.0.0", 
-        port=3000,
-        log_level="info",
-        access_log=True,
-        reload=False
-    )
-    server = uvicorn.Server(config)
-    logger.info("🌐 Веб-сервер MiniApp запускается на порту 3000")
-    await server.serve()
+def run_web_server():
+    """Запуск веб-сервера в отдельном потоке"""
+    try:
+        config = uvicorn.Config(
+            web_app, 
+            host="0.0.0.0", 
+            port=3000,
+            log_level="info",
+            access_log=False,
+            reload=False
+        )
+        server = uvicorn.Server(config)
+        logger.info("🌐 Веб-сервер MiniApp запущен на порту 3000")
+        server.run()
+    except Exception as e:
+        logger.error(f"❌ Ошибка веб-сервера: {e}")
 
 async def post_init(application):
     """Функция, выполняемая после инициализации бота"""
@@ -310,27 +305,6 @@ async def post_init(application):
     # Проверяем настройки MiniApp
     if MINIAPP_URL:
         logger.info(f"🌐 MiniApp настроен: {MINIAPP_URL}")
-        
-        # Проверяем доступность MiniApp
-        try:
-            import aiohttp
-            import asyncio
-            
-            async def check_miniapp():
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(MINIAPP_URL, timeout=5) as response:
-                            if response.status == 200:
-                                logger.info(f"✅ MiniApp доступен по адресу {MINIAPP_URL}")
-                            else:
-                                logger.warning(f"⚠️ MiniApp отвечает с кодом {response.status}")
-                except Exception as e:
-                    logger.warning(f"❌ Не удалось проверить MiniApp: {e}")
-            
-            # Запускаем проверку в фоне
-            asyncio.create_task(check_miniapp())
-        except:
-            pass
     else:
         logger.warning("⚠️ MiniApp URL не настроен в конфигурации")
 
@@ -354,7 +328,7 @@ class UserFilter(filters.MessageFilter):
 admin_filter = AdminFilter()
 user_filter = UserFilter()
 
-# НОВАЯ ФУНКЦИЯ: Обработчик для кнопки MiniApp
+# ФУНКЦИЯ: Обработчик для кнопки MiniApp
 async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Открыть MiniApp"""
     user_id = update.effective_user.id
@@ -395,34 +369,6 @@ async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 💰 Вашему балансу баллов\n"
         "• 📋 История бронирований\n\n"
         "Нажмите кнопку ниже, чтобы открыть:",
-        reply_markup=keyboard,
-        parse_mode='Markdown'
-    )
-
-# НОВАЯ ФУНКЦИЯ: Команда для администраторов чтобы протестировать MiniApp
-async def test_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Тестирование MiniApp (только для администраторов)"""
-    if not is_admin(update.effective_user.id):
-        return
-    
-    if not MINIAPP_URL:
-        await update.message.reply_text(
-            "❌ MiniApp URL не настроен в конфигурации.\n"
-            "Добавьте MINIAPP_URL = 'https://vovsetyagskie.bothost.ru' в config.py"
-        )
-        return
-    
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
-            "🧪 Тест MiniApp",
-            web_app=WebAppInfo(url=MINIAPP_URL)
-        )
-    ]])
-    
-    await update.message.reply_text(
-        "🧪 **Тестирование MiniApp**\n\n"
-        f"URL: {MINIAPP_URL}\n\n"
-        "Нажмите кнопку для открытия веб-приложения:",
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
@@ -616,7 +562,6 @@ def setup_handlers(application):
         application.add_handler(handler)
 
     # 4. ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ
-    # Обновляем меню пользователя (добавляем кнопку MiniApp)
     application.add_handler(MessageHandler(filters.Regex("^💰 Мой баланс$") & user_filter, show_balance))
     application.add_handler(MessageHandler(filters.Regex("^🎁 Реферальная программа$") & user_filter, show_referral_info))
     application.add_handler(MessageHandler(filters.Regex("^📋 Мои бронирования$") & user_filter, show_user_bookings))
@@ -711,13 +656,12 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(calculate_all_orders, pattern="^calculate_all_orders$"))
     application.add_handler(CallbackQueryHandler(show_shift_status, pattern="^shift_status$"))
 
-    # 7. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
+    # 7. КОМАНДЫ
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("reset_shift", reset_shift_data))
     application.add_handler(CommandHandler("debug_shifts", debug_shifts))
     application.add_handler(CommandHandler("webapp", open_miniapp))
-    application.add_handler(CommandHandler("test_miniapp", test_miniapp))
 
     # 8. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Назад$"), handle_back_button))
@@ -726,22 +670,24 @@ def setup_handlers(application):
     # 9. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unknown_message))
 
-async def main():
-    """Основная асинхронная функция запуска бота и веб-сервера"""
+def main():
+    """Основная функция запуска бота"""
     try:
         # Проверка токена
         if not BOT_TOKEN:
             logger.error("❌ Токен бота не найден! Проверьте файл .env")
             return
 
-        # Запускаем веб-сервер в фоне
-        web_server_task = asyncio.create_task(run_web_server())
-        logger.info("🚀 Запуск веб-сервера MiniApp...")
+        # Запуск веб-сервера в отдельном потоке
+        web_thread = threading.Thread(target=run_web_server, daemon=True)
+        web_thread.start()
+        logger.info("🌐 Веб-сервер MiniApp запущен в отдельном потоке")
+        
+        # Даем веб-серверу время на запуск
+        import time
+        time.sleep(2)
 
-        # Даем веб-серверу время запуститься
-        await asyncio.sleep(1)
-
-        # Создание приложения бота
+        # Создание приложения
         application = Application.builder() \
             .token(BOT_TOKEN) \
             .post_init(post_init) \
@@ -749,37 +695,31 @@ async def main():
             .build()
 
         # Настройка обработчиков
-        logger.info("🔄 Настройка обработчиков бота...")
+        logger.info("🔄 Настройка обработчиков...")
         setup_handlers(application)
 
         # Запуск бота
-        logger.info("🤖 Запуск Telegram бота...")
+        logger.info("🚀 Запуск бота...")
         print("=" * 50)
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
         print("🌐 MiniApp доступен по команде /webapp")
-        print(f"🌐 Веб-сервер работает на: http://localhost:3000")
-        print(f"🌐 Внешний доступ: {MINIAPP_URL}")
+        print("🌐 Веб-сервер работает на: http://localhost:3000")
+        if MINIAPP_URL:
+            print(f"🌐 Внешний доступ: {MINIAPP_URL}")
+        else:
+            print("⚠️  MiniApp не настроен. Настройте MINIAPP_URL в config.py")
         print("=" * 50)
 
-        # Запускаем бота
-        await application.run_polling(
+        application.run_polling(
             allowed_updates=['message', 'callback_query'],
             timeout=60,
             drop_pending_updates=True,
             poll_interval=0.5
         )
 
-        # Ждем завершения задачи веб-сервера
-        await web_server_task
-
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при запуске бота: {e}", exc_info=True)
         print(f"❌ Ошибка: {e}")
-    finally:
-        logger.info("🛑 Приложение завершено")
 
 if __name__ == '__main__':
-    # Запускаем асинхронную основную функцию
-    asyncio.run(main())
-
-
+    main()
