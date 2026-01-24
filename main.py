@@ -512,7 +512,7 @@ if not INDEX_FILE.exists():
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 24px;
-            padding: 28px;
+            padding: 28px
         }
         .form-group { margin-bottom: 20px; }
         .form-label { display: block; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
@@ -1906,6 +1906,149 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Создание таблиц основной базы данных
+def create_main_tables():
+    """Создать основные таблицы для работы бота"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Таблица пользователей
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id TEXT UNIQUE NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                username TEXT,
+                phone TEXT,
+                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                balance INTEGER DEFAULT 0,
+                bonus_balance INTEGER DEFAULT 0,
+                referral_code TEXT UNIQUE,
+                referred_by TEXT,
+                is_admin BOOLEAN DEFAULT FALSE
+            )
+        ''')
+        
+        # Таблица бронирований
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bookings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                customer_name TEXT NOT NULL,
+                customer_phone TEXT NOT NULL,
+                booking_date DATE NOT NULL,
+                booking_time TIME NOT NULL,
+                guests INTEGER NOT NULL,
+                comment TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                source TEXT DEFAULT 'bot',
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Таблица бонусных запросов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bonus_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                description TEXT,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP,
+                admin_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Таблица транзакций
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        # Таблица заказов
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                table_number INTEGER,
+                total_amount INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                closed_at TIMESTAMP,
+                shift_id INTEGER,
+                payment_method TEXT,
+                FOREIGN KEY (shift_id) REFERENCES shifts (id)
+            )
+        ''')
+        
+        # Таблица товаров в заказах
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS order_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                menu_item_id INTEGER NOT NULL,
+                quantity INTEGER NOT NULL,
+                price INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES orders (id)
+            )
+        ''')
+        
+        # Таблица смен
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                end_time TIMESTAMP,
+                total_orders INTEGER DEFAULT 0,
+                total_amount INTEGER DEFAULT 0,
+                is_open BOOLEAN DEFAULT TRUE
+            )
+        ''')
+        
+        # Таблица меню
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS menu (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                description TEXT,
+                is_available BOOLEAN DEFAULT TRUE,
+                position INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Таблица для хранения ID сообщений для последующего удаления
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        logger.info("✅ Основные таблицы базы данных созданы/проверены")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания основных таблиц: {e}")
+    finally:
+        conn.close()
+
 # Проверка подписи Telegram WebApp - ИСПРАВЛЕННАЯ ВЕРСИЯ
 def verify_telegram_data(init_data: str, bot_token: str) -> bool:
     """Проверяет подпись данных от Telegram WebApp"""
@@ -3286,6 +3429,10 @@ def main():
             logger.error("❌ Токен бота не найден! Проверьте файл .env")
             return
 
+        # Создаем основные таблицы для бота
+        logger.info("🔄 Создание/проверка основных таблиц базы данных...")
+        create_main_tables()
+        
         # Создаем таблицы для MiniApp
         logger.info("🔄 Создание/проверка таблиц MiniApp...")
         create_miniapp_tables()
@@ -3343,4 +3490,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
