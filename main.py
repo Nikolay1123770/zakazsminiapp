@@ -1,5 +1,3 @@
-[file name]: main.py
-[file content begin]
 import logging
 import os
 import warnings
@@ -18,6 +16,11 @@ warnings.filterwarnings("ignore", category=PTBUserWarning)
 
 # Загрузка переменных окружения
 load_dotenv()
+
+# Ваш домен для WebApp
+WEBAPP_URL = "https://vovsetyagskie.bothost.ru:8080/webapp.html"
+
+logger = logging.getLogger(__name__)
 
 
 async def post_init(application):
@@ -54,643 +57,6 @@ class UserFilter(filters.MessageFilter):
 admin_filter = AdminFilter()
 user_filter = UserFilter()
 
-
-# HTML для WebApp
-WEBAPP_HTML = """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hookah Lounge MiniApp</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-
-        .container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 400px;
-            width: 100%;
-            overflow: hidden;
-            animation: slideIn 0.5s ease;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .header {
-            background: linear-gradient(135deg, #4a6fa5 0%, #6c5ce7 100%);
-            color: white;
-            padding: 30px 20px;
-            text-align: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .header::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-            background-size: 20px 20px;
-            animation: float 20s linear infinite;
-        }
-
-        @keyframes float {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            position: relative;
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-        }
-
-        .header p {
-            font-size: 16px;
-            opacity: 0.9;
-            position: relative;
-        }
-
-        .logo {
-            width: 80px;
-            height: 80px;
-            background: white;
-            border-radius: 50%;
-            margin: 0 auto 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-            color: #6c5ce7;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        }
-
-        .content {
-            padding: 30px;
-        }
-
-        .section {
-            margin-bottom: 30px;
-        }
-
-        .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .section-title i {
-            color: #6c5ce7;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-        }
-
-        .stat-card:nth-child(2) {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
-
-        .stat-card:nth-child(3) {
-            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-        }
-
-        .stat-card:nth-child(4) {
-            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        }
-
-        .stat-value {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 5px;
-        }
-
-        .stat-label {
-            font-size: 14px;
-            opacity: 0.9;
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
-            color: white;
-            border: none;
-            padding: 15px 25px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(108, 92, 231, 0.3);
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(108, 92, 231, 0.4);
-        }
-
-        .btn-secondary {
-            background: linear-gradient(135deg, #dfe6e9 0%, #b2bec3 100%);
-            color: #2d3436;
-            box-shadow: 0 5px 15px rgba(178, 190, 195, 0.3);
-        }
-
-        .btn-secondary:hover {
-            box-shadow: 0 8px 20px rgba(178, 190, 195, 0.4);
-        }
-
-        .menu-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-
-        .menu-item {
-            background: white;
-            border-radius: 12px;
-            padding: 15px;
-            border: 2px solid #f1f2f6;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .menu-item:hover {
-            border-color: #6c5ce7;
-            transform: translateY(-3px);
-            box-shadow: 0 10px 20px rgba(108, 92, 231, 0.1);
-        }
-
-        .menu-item h4 {
-            color: #333;
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-
-        .menu-item p {
-            color: #6c5ce7;
-            font-weight: 600;
-            font-size: 18px;
-        }
-
-        .order-list {
-            max-height: 200px;
-            overflow-y: auto;
-            margin-bottom: 20px;
-        }
-
-        .order-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid #eee;
-        }
-
-        .order-item:last-child {
-            border-bottom: none;
-        }
-
-        .order-name {
-            font-weight: 500;
-            color: #333;
-        }
-
-        .order-price {
-            font-weight: 600;
-            color: #6c5ce7;
-        }
-
-        .total {
-            font-size: 24px;
-            font-weight: 700;
-            color: #333;
-            text-align: center;
-            margin: 20px 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-            border-radius: 15px;
-        }
-
-        .loader {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .notification {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #00b894;
-            color: white;
-            padding: 15px 25px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-            animation: slideUp 0.3s ease;
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translate(-50%, 20px);
-            }
-            to {
-                opacity: 1;
-                transform: translate(-50%, 0);
-            }
-        }
-
-        .error {
-            background: #e74c3c;
-        }
-
-        .warning {
-            background: #f39c12;
-        }
-
-        @media (max-width: 480px) {
-            .container {
-                margin: 10px;
-            }
-            
-            .content {
-                padding: 20px;
-            }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .menu-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="loader" id="loader">
-        <div class="spinner"></div>
-    </div>
-
-    <div class="container" id="mainApp" style="display: none;">
-        <div class="header">
-            <div class="logo">🍹</div>
-            <h1>Hookah Lounge</h1>
-            <p>Ваш кальян-бар премиум класса</p>
-        </div>
-
-        <div class="content">
-            <div class="section">
-                <h2 class="section-title">
-                    <span>📊 Моя статистика</span>
-                </h2>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-value" id="balance">0</div>
-                        <div class="stat-label">Баллов</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="bookings">0</div>
-                        <div class="stat-label">Бронирований</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="orders">0</div>
-                        <div class="stat-label">Заказов</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="referrals">0</div>
-                        <div class="stat-label">Рефералов</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="section">
-                <h2 class="section-title">
-                    <span>📋 Меню</span>
-                </h2>
-                <div class="menu-grid" id="menuGrid">
-                    <!-- Меню будет загружено динамически -->
-                </div>
-            </div>
-
-            <div class="section">
-                <h2 class="section-title">
-                    <span>🛒 Мой заказ</span>
-                </h2>
-                <div class="order-list" id="orderList">
-                    <!-- Список заказа будет загружен динамически -->
-                    <div style="text-align: center; color: #999; padding: 20px;">
-                        Заказ пуст
-                    </div>
-                </div>
-                <div class="total" id="orderTotal">
-                    Итого: 0 ₽
-                </div>
-                <button class="btn" onclick="sendOrder()">
-                    <span>🚀 Отправить заказ</span>
-                </button>
-            </div>
-
-            <div class="section">
-                <h2 class="section-title">
-                    <span>⚡ Быстрые действия</span>
-                </h2>
-                <button class="btn" onclick="showBooking()">
-                    <span>📅 Забронировать стол</span>
-                </button>
-                <button class="btn btn-secondary" onclick="showContacts()" style="margin-top: 10px;">
-                    <span>📞 Контакты</span>
-                </button>
-                <button class="btn btn-secondary" onclick="showReferral()" style="margin-top: 10px;">
-                    <span>🎁 Реферальная программа</span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Инициализация Telegram WebApp
-        const tg = window.Telegram.WebApp;
-        
-        // Расширяем WebApp на весь экран
-        tg.expand();
-        tg.MainButton.setText("Обновить");
-        tg.MainButton.onClick(refreshData);
-        tg.MainButton.show();
-
-        let userData = {};
-        let cart = [];
-
-        // Функция для обновления корзины
-        function updateCart() {
-            const orderList = document.getElementById('orderList');
-            const orderTotal = document.getElementById('orderTotal');
-            
-            if (cart.length === 0) {
-                orderList.innerHTML = `
-                    <div style="text-align: center; color: #999; padding: 20px;">
-                        Заказ пуст
-                    </div>
-                `;
-                orderTotal.textContent = 'Итого: 0 ₽';
-                return;
-            }
-
-            let html = '';
-            let total = 0;
-            
-            cart.forEach((item, index) => {
-                total += item.price * item.quantity;
-                html += `
-                    <div class="order-item">
-                        <div class="order-name">
-                            ${item.name} × ${item.quantity}
-                        </div>
-                        <div class="order-price">
-                            ${item.price * item.quantity} ₽
-                        </div>
-                    </div>
-                `;
-            });
-
-            orderList.innerHTML = html;
-            orderTotal.textContent = `Итого: ${total} ₽`;
-        }
-
-        // Функция для добавления в корзину
-        function addToCart(item) {
-            const existingItem = cart.find(i => i.id === item.id);
-            
-            if (existingItem) {
-                existingItem.quantity += 1;
-            } else {
-                cart.push({
-                    id: item.id,
-                    name: item.name,
-                    price: item.price,
-                    quantity: 1
-                });
-            }
-            
-            updateCart();
-            showNotification(`✅ ${item.name} добавлен в заказ`);
-        }
-
-        // Функция для отправки заказа
-        function sendOrder() {
-            if (cart.length === 0) {
-                showNotification('❌ Заказ пуст!', 'error');
-                return;
-            }
-
-            tg.showPopup({
-                title: 'Подтверждение заказа',
-                message: 'Отправить заказ администратору?',
-                buttons: [
-                    {id: 'cancel', type: 'cancel', text: '❌ Отмена'},
-                    {id: 'send', type: 'default', text: '✅ Отправить'}
-                ]
-            }, function(btnId) {
-                if (btnId === 'send') {
-                    const orderData = {
-                        type: 'order',
-                        cart: cart,
-                        tableNumber: prompt('Введите номер стола:', '1') || '1'
-                    };
-
-                    tg.sendData(JSON.stringify(orderData));
-                    showNotification('📤 Заказ отправлен!', 'success');
-                    cart = [];
-                    updateCart();
-                }
-            });
-        }
-
-        // Функция для показа бронирования
-        function showBooking() {
-            tg.showPopup({
-                title: 'Бронирование стола',
-                message: 'Выберите дату и время бронирования',
-                buttons: [
-                    {id: 'today', type: 'default', text: '📅 Сегодня'},
-                    {id: 'tomorrow', type: 'default', text: '📆 Завтра'},
-                    {id: 'cancel', type: 'cancel', text: '❌ Отмена'}
-                ]
-            }, function(btnId) {
-                if (btnId === 'today' || btnId === 'tomorrow') {
-                    const date = btnId === 'today' ? 'сегодня' : 'завтра';
-                    tg.sendData(JSON.stringify({
-                        type: 'booking',
-                        date: date,
-                        time: prompt('Введите время (например, 19:00):', '19:00') || '19:00'
-                    }));
-                    showNotification(`📅 Бронирование на ${date} отправлено!`, 'success');
-                }
-            });
-        }
-
-        // Функция для показа контактов
-        function showContacts() {
-            tg.sendData(JSON.stringify({type: 'contacts'}));
-        }
-
-        // Функция для показа реферальной программы
-        function showReferral() {
-            tg.sendData(JSON.stringify({type: 'referral'}));
-        }
-
-        // Функция для обновления данных
-        function refreshData() {
-            tg.sendData(JSON.stringify({type: 'refresh'}));
-        }
-
-        // Функция для показа уведомлений
-        function showNotification(message, type = 'success') {
-            const notification = document.createElement('div');
-            notification.className = `notification ${type}`;
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
-        }
-
-        // Функция для загрузки меню
-        function loadMenu() {
-            // В реальном приложении здесь будет запрос к API
-            const menuItems = [
-                {id: 1, name: 'Пенсионный', price: 800, category: 'Кальяны'},
-                {id: 2, name: 'Стандарт', price: 1000, category: 'Кальяны'},
-                {id: 3, name: 'Премиум', price: 1200, category: 'Кальяны'},
-                {id: 4, name: 'Вода', price: 100, category: 'Напитки'},
-                {id: 5, name: 'Кола 0,5л', price: 100, category: 'Напитки'},
-                {id: 6, name: 'Да Хун Пао', price: 400, category: 'Чай'},
-                {id: 7, name: 'Пробирки', price: 600, category: 'Коктейли'}
-            ];
-
-            const menuGrid = document.getElementById('menuGrid');
-            let html = '';
-            
-            menuItems.forEach(item => {
-                html += `
-                    <div class="menu-item" onclick="addToCart(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                        <h4>${item.name}</h4>
-                        <p>${item.price} ₽</p>
-                    </div>
-                `;
-            });
-
-            menuGrid.innerHTML = html;
-        }
-
-        // Обработчик данных от бота
-        tg.onEvent('webAppDataReceived', function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                
-                if (data.type === 'user_data') {
-                    userData = data;
-                    document.getElementById('balance').textContent = data.balance || 0;
-                    document.getElementById('bookings').textContent = data.bookings || 0;
-                    document.getElementById('orders').textContent = data.orders || 0;
-                    document.getElementById('referrals').textContent = data.referrals || 0;
-                    
-                    // Скрываем загрузчик и показываем основное приложение
-                    document.getElementById('loader').style.display = 'none';
-                    document.getElementById('mainApp').style.display = 'block';
-                    
-                    loadMenu();
-                }
-            } catch (e) {
-                console.error('Error parsing data:', e);
-            }
-        });
-
-        // Запрашиваем данные пользователя при загрузке
-        tg.ready();
-        tg.sendData(JSON.stringify({type: 'init'}));
-    </script>
-</body>
-</html>
-"""
 
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик данных из WebApp"""
@@ -800,6 +166,7 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             elif data.get('type') == 'contacts':
                 # Показываем контакты
+                from handlers.user_handlers import show_contacts
                 await show_contacts(update, context)
             
             elif data.get('type') == 'referral':
@@ -818,57 +185,159 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Запуск WebApp"""
-    keyboard = [
-        [InlineKeyboardButton(
-            text="🎮 Открыть MiniApp",
-            web_app=WebAppInfo(url="https://yourdomain.com/webapp.html")
-        )],
-        [InlineKeyboardButton(
-            text="📱 Открыть встроенное приложение",
-            callback_data="open_builtin_webapp"
-        )]
-    ]
-    
-    await update.message.reply_text(
-        "🎮 *Доступ к MiniApp*\n\n"
-        "Выберите способ запуска приложения:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-async def open_builtin_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Открытие встроенного WebApp"""
-    # Создаем кнопку для открытия WebApp
     keyboard = [[
         InlineKeyboardButton(
-            text="🚀 Открыть приложение",
-            web_app=WebAppInfo(url=f"data:text/html;base64,{WEBAPP_HTML.encode('utf-8').hex()}")
+            text="🎮 Открыть Hookah Lounge App",
+            web_app=WebAppInfo(url=WEBAPP_URL)
         )
     ]]
     
-    await update.callback_query.message.reply_text(
-        "🎮 *Встроенное приложение*\n\n"
-        "Нажмите кнопку ниже для запуска:",
+    await update.message.reply_text(
+        "🎮 *Доступ к Hookah Lounge MiniApp*\n\n"
+        "Нажмите кнопку ниже для запуска современного приложения с:\n"
+        "• 📊 Вашей статистикой\n"
+        "• 📋 Интерактивным меню\n"
+        "• 🛒 Удобной корзиной заказов\n"
+        "• 📅 Быстрым бронированием\n\n"
+        "*Функции для администраторов:*\n"
+        "• Создание заказов\n"
+        "• Управление столами\n"
+        "• Просмотр статистики",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-async def webapp_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для отладки WebApp"""
+async def setup_webapp_hosting(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Настройка хостинга WebApp"""
     if not is_admin(update.effective_user.id):
         return
     
-    # Отправляем HTML прямо в сообщении для тестирования
+    html_content = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hookah Lounge App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        .status {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            font-weight: bold;
+        }
+        .btn {
+            background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+            margin-top: 20px;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 Hookah Lounge MiniApp</h1>
+        <div class="status">✅ Веб-приложение готово к работе</div>
+        <p>Это приложение интегрировано с Telegram ботом Hookah Lounge.</p>
+        <p>Для использования откройте бота и нажмите "Открыть Hookah Lounge App"</p>
+        <button class="btn" onclick="testApp()">Тестировать приложение</button>
+    </div>
+    <script>
+        function testApp() {
+            alert('Приложение работает корректно!');
+            if (window.Telegram && Telegram.WebApp) {
+                Telegram.WebApp.ready();
+                Telegram.WebApp.expand();
+            }
+        }
+    </script>
+</body>
+</html>
+    """
+    
     await update.message.reply_text(
-        f"📋 *WebApp HTML*\n\n"
-        f"Размер HTML: {len(WEBAPP_HTML)} символов\n"
-        f"Элементы:\n"
-        f"• Заголовок: Hookah Lounge MiniApp\n"
-        f"• Секции: Статистика, Меню, Заказ, Действия\n"
-        f"• Функции: Добавление в корзину, Бронирование\n\n"
-        f"Для запуска используйте /start_webapp",
+        f"🌐 *Настройка хостинга WebApp*\n\n"
+        f"Ваш домен: `{WEBAPP_URL}`\n\n"
+        f"*Инструкция:*\n"
+        f"1. Создайте файл `webapp.html` в корне вашего сервера\n"
+        f"2. Добавьте следующий HTML код:\n"
+        f"```html\n{html_content[:500]}...\n```\n"
+        f"3. Убедитесь, что порт 8080 открыт\n"
+        f"4. Используйте команду `/start_webapp` для тестирования",
+        parse_mode='Markdown'
+    )
+
+
+async def webapp_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Тестирование WebApp"""
+    keyboard = [[
+        InlineKeyboardButton("🎮 Тест WebApp", web_app=WebAppInfo(url=WEBAPP_URL))
+    ]]
+    
+    await update.message.reply_text(
+        "🔧 *Тестирование WebApp*\n\n"
+        "Нажмите кнопку для проверки работы WebApp.\n"
+        "Если приложение не открывается, проверьте:\n"
+        "• Файл `webapp.html` на сервере\n"
+        "• Доступность порта 8080\n"
+        "• SSL сертификат (для HTTPS)",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def show_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать контакты"""
+    await update.message.reply_text(
+        "📞 *Контакты Hookah Lounge*\n\n"
+        "*Телефон:* +7 (XXX) XXX-XX-XX\n"
+        "*Telegram:* @hookahlounge\n"
+        "*Адрес:* Ваш адрес\n\n"
+        "*Режим работы:*\n"
+        "Пн-Чт: 18:00 - 02:00\n"
+        "Пт-Сб: 18:00 - 04:00\n"
+        "Вс: 18:00 - 02:00",
         parse_mode='Markdown'
     )
 
@@ -884,7 +353,7 @@ def setup_handlers(application):
         handle_user_cancelled_bookings_button, handle_user_all_bookings_button,
         handle_user_back_to_bookings_button, handle_user_cancel_booking,
         handle_back_to_bookings_list, start, back_to_main,
-        show_contacts, handle_call_contact, handle_telegram_contact,
+        handle_call_contact, handle_telegram_contact,
         handle_open_maps, handle_back_from_contacts, handle_back_to_contacts_callback
     )
 
@@ -1121,8 +590,8 @@ def setup_handlers(application):
 
     # ОБРАБОТЧИКИ WEBAPP (добавляем в начало для приоритета)
     application.add_handler(CommandHandler("start_webapp", start_webapp))
-    application.add_handler(CommandHandler("webapp_debug", webapp_debug))
-    application.add_handler(CallbackQueryHandler(open_builtin_webapp, pattern="^open_builtin_webapp$"))
+    application.add_handler(CommandHandler("webapp_hosting", setup_webapp_hosting))
+    application.add_handler(CommandHandler("webapp_test", webapp_test))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
 
     # ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ (только для обычных пользователей)
@@ -1353,8 +822,9 @@ def main():
         logger.info("🚀 Запуск бота...")
         print("=" * 50)
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
-        print("📱 WebApp доступен по команде /start_webapp")
-        print("🛠 Отладка WebApp: /webapp_debug")
+        print("🌐 WebApp доступен по команде /start_webapp")
+        print("🔧 Настройка хоста: /webapp_hosting")
+        print("🧪 Тестирование: /webapp_test")
         print("=" * 50)
 
         application.run_polling(
@@ -1377,4 +847,3 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
 
     main()
-[file content end]
