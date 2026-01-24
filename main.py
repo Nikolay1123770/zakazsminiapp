@@ -356,6 +356,55 @@ def setup_handlers(application):
                 parse_mode='Markdown'
             )
 
+    # НОВАЯ ФУНКЦИЯ: Обновленный старт с Web App кнопкой
+    async def start_with_web_app(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обновленный обработчик /start с Web App кнопкой"""
+        user = update.effective_user
+        
+        # Проверяем регистрацию пользователя
+        user_data = db.get_user(user.id)
+        
+        if not user_data:
+            # Пользователь не зарегистрирован - показываем меню с Web App
+            keyboard = [
+                [InlineKeyboardButton("📱 Открыть меню", web_app=WebAppInfo(url=WEB_APP_URL))],
+                [InlineKeyboardButton("📝 Зарегистрироваться", callback_data="register")]
+            ]
+            
+            await update.message.reply_text(
+                f"👋 *Добро пожаловать, {user.first_name}!*\n\n"
+                f"🍸 Добро пожаловать в 'Во Все Тяжкие' - премиальную кальянную!\n\n"
+                f"📱 Для просмотра меню и бронирования используйте Web App.\n"
+                f"📝 Для доступа к бонусам и балансу пройдите регистрацию.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+        else:
+            # Пользователь зарегистрирован - показываем полное меню
+            keyboard = [
+                [InlineKeyboardButton("📱 Открыть меню", web_app=WebAppInfo(url=WEB_APP_URL))],
+                [
+                    InlineKeyboardButton("💰 Баланс", callback_data="balance"),
+                    InlineKeyboardButton("📅 Мои брони", callback_data="my_bookings")
+                ],
+                [
+                    InlineKeyboardButton("🎁 Рефералы", callback_data="referrals"),
+                    InlineKeyboardButton("📞 Контакты", callback_data="contacts")
+                ]
+            ]
+            
+            await update.message.reply_text(
+                f"👋 *С возвращением, {user_data[2]}!*\n\n"
+                f"💰 Ваш баланс: *{user_data[5]} баллов*\n\n"
+                f"📱 Используйте Web App для:\n"
+                f"• Просмотра меню\n"
+                f"• Бронирования столиков\n"
+                f"• Просмотра галереи\n\n"
+                f"Или используйте кнопки ниже:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+
     # НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ПОИСКА ПОЛЬЗОВАТЕЛЕЙ АДМИНОМ
     async def handle_admin_user_search_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик текстовых сообщений админа для поиска пользователей"""
@@ -615,7 +664,7 @@ def setup_handlers(application):
 
     # КОМАНДЫ
     application.add_handler(CommandHandler("admin", admin_panel))
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start_with_web_app))  # ИСПРАВЛЕНО: используем обновленный старт
     application.add_handler(CommandHandler("reset_shift", reset_shift_data))
     application.add_handler(CommandHandler("debug_shifts", debug_shifts))  # НОВАЯ КОМАНДА
     
