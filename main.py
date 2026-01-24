@@ -1074,6 +1074,36 @@ if not INDEX_FILE.exists():
     </div>
 
     <script>
+        // Для тестирования вне Telegram
+        if (!window.Telegram?.WebApp) {
+            console.log('⚠️ Режим эмуляции Telegram WebApp');
+            window.Telegram = {
+                WebApp: {
+                    initData: 'query_id=test&user=%7B%22id%22%3A8187406973%2C%22first_name%22%3A%22Test%22%7D&auth_date=1234567890&hash=test',
+                    initDataUnsafe: {
+                        user: {
+                            id: 8187406973,
+                            first_name: 'Test',
+                            last_name: 'User',
+                            username: 'testuser',
+                            language_code: 'ru'
+                        }
+                    },
+                    ready: () => console.log('Telegram WebApp ready'),
+                    expand: () => console.log('Telegram WebApp expanded'),
+                    MainButton: {
+                        hide: () => console.log('MainButton hidden')
+                    },
+                    HapticFeedback: {
+                        impactOccurred: (style) => console.log('Haptic:', style)
+                    },
+                    openLink: (url) => window.open(url, '_blank'),
+                    sendData: (data) => console.log('Data sent:', data),
+                    colorScheme: 'dark'
+                }
+            };
+        }
+        
         const tg = window.Telegram?.WebApp;
         const API_URL = window.location.origin; // Базовый URL API
         const IS_TELEGRAM = !!tg;
@@ -1374,6 +1404,8 @@ if not INDEX_FILE.exists():
                 } else if (response.ok) {
                     userData = await response.json();
                     console.log('✅ Данные пользователя загружены:', userData);
+                } else {
+                    console.log('⚠️ Не удалось загрузить данные пользователя, статус:', response.status);
                 }
                 
                 updateUserProfile(userData);
@@ -1828,25 +1860,28 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# Проверка подписи Telegram WebApp
+# Проверка подписи Telegram WebApp - ИСПРАВЛЕННАЯ ВЕРСИЯ
 def verify_telegram_data(init_data: str, bot_token: str) -> bool:
     """Проверяет подпись данных от Telegram WebApp"""
     try:
         if not init_data:
+            logger.warning("❌ Нет данных для проверки")
             return False
             
         # Парсим данные
         data_pairs = init_data.split('&')
-        hash_pair = [pair for pair in data_pairs if pair.startswith('hash=')][0] if any(pair.startswith('hash=') for pair in data_pairs) else None
+        hash_pair = [pair for pair in data_pairs if pair.startswith('hash=')]
         
         if not hash_pair:
+            logger.warning("❌ Нет хэша в данных")
             return False
             
-        hash_value = hash_pair.split('=')[1]
+        hash_value = hash_pair[0].split('=')[1]
         
         # Удаляем хэш из данных
         data_without_hash = [pair for pair in data_pairs if not pair.startswith('hash=')]
-        data_str = '&'.join(sorted(data_without_hash))
+        data_without_hash.sort()
+        data_str = '&'.join(data_without_hash)
         
         # Вычисляем секретный ключ
         secret_key = hmac.new(
@@ -1864,7 +1899,7 @@ def verify_telegram_data(init_data: str, bot_token: str) -> bool:
         
         return computed_hash == hash_value
     except Exception as e:
-        logger.error(f"Ошибка проверки подписи Telegram: {e}")
+        logger.error(f"❌ Ошибка проверки подписи Telegram: {e}")
         return False
 
 # Создаем FastAPI приложение для MiniApp
@@ -1879,25 +1914,56 @@ web_app.add_middleware(
     allow_headers=["*"],
 )
 
-# Middleware для проверки данных Telegram
+# Middleware для проверки данных Telegram - ИСПРАВЛЕННАЯ ВЕРСИЯ
 async def verify_telegram_request(request: Request):
     """Проверяет подпись запроса от Telegram"""
     init_data = request.headers.get('X-Telegram-Init-Data')
     
     if not init_data:
         # Для публичных эндпоинтов пропускаем проверку
-        public_endpoints = ['/api/menu', '/api/config', '/health', '/api/health', '/', '/index.html']
-        if request.url.path in public_endpoints:
-            return None
+        public_endpoints = [
+            '/api/menu', 
+            '/api/config', 
+            '/health', 
+            '/api/health', 
+            '/', 
+            '/index.html',
+            '/api/gallery',
+            '/static'
+        ]
+        
+        if request.url.path in public_endpoints or request.url.path.startswith('/static'):
+            logger.debug(f"✅ Публичный эндпоинт: {request.url.path}")
+            return {"id": 0, "first_name": "Гость", "is_guest": True}
+        
+        logger.warning(f"❌ Нет данных Telegram для защищенного эндпоинта: {request.url.path}")
+        
+        # Для разработки можно пропускать проверку
+        if os.getenv('ENVIRONMENT', 'production') == 'development':
+            logger.warning("⚠️ Режим разработки: пропускаем проверку авторизации")
+            return {"id": 8187406973, "first_name": "Dev User", "is_guest": False}
         
         # Для остальных возвращаем ошибку
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Требуется авторизация Telegram"
+            detail="Требуется авторизация Telegram. Откройте приложение через Telegram."
         )
     
     # Проверяем подпись
     if not verify_telegram_data(init_data, BOT_TOKEN):
+        logger.warning("❌ Неверная подпись Telegram данных")
+        
+        # Для разработки пропускаем
+        if os.getenv('ENVIRONMENT', 'production') == 'development':
+            logger.warning("⚠️ Режим разработки: пропускаем проверку подписи")
+            try:
+                parsed_data = urllib.parse.parse_qs(init_data)
+                user_str = parsed_data.get('user', ['{}'])[0]
+                user_data = json.loads(user_str) if user_str else {}
+                return {**user_data, "is_guest": False}
+            except:
+                return {"id": 8187406973, "first_name": "Dev User", "is_guest": False}
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверная подпись Telegram"
@@ -1909,10 +1975,11 @@ async def verify_telegram_request(request: Request):
         user_str = parsed_data.get('user', ['{}'])[0]
         user_data = json.loads(user_str) if user_str else {}
         
-        return user_data
+        logger.info(f"✅ Пользователь авторизован: {user_data.get('id')} - {user_data.get('first_name')}")
+        return {**user_data, "is_guest": False}
     except Exception as e:
-        logger.error(f"Ошибка парсинга данных пользователя: {e}")
-        return {}
+        logger.error(f"❌ Ошибка парсинга данных пользователя: {e}")
+        return {"id": 0, "first_name": "Ошибка", "is_guest": True}
 
 # Создаем таблицы для MiniApp
 def create_miniapp_tables():
@@ -2043,7 +2110,7 @@ def create_miniapp_tables():
     finally:
         conn.close()
 
-# API эндпоинты
+# API эндпоинты - ИСПРАВЛЕННЫЕ ВЕРСИИ
 @web_app.get("/api/menu")
 async def get_miniapp_menu():
     """Получить все товары меню для MiniApp"""
@@ -2147,6 +2214,12 @@ async def get_miniapp_config():
 @web_app.get("/api/user/{telegram_id}")
 async def get_miniapp_user(telegram_id: int, user_data: dict = Depends(verify_telegram_request)):
     """Получить информацию о пользователе для MiniApp"""
+    
+    # Проверяем, запрашивает ли пользователь свои данные
+    if user_data.get("id") != telegram_id and not user_data.get("is_guest", True):
+        logger.warning(f"❌ Пользователь {user_data.get('id')} пытается получить данные пользователя {telegram_id}")
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
     conn = get_db_connection()
     
     try:
@@ -2162,6 +2235,19 @@ async def get_miniapp_user(telegram_id: int, user_data: dict = Depends(verify_te
         user = cursor.fetchone()
         
         if not user:
+            # Для гостевого доступа возвращаем базовую информацию
+            if user_data.get("is_guest", True):
+                return JSONResponse({
+                    "user_id": None,
+                    "telegram_id": telegram_id,
+                    "first_name": user_data.get("first_name", "Гость"),
+                    "last_name": "",
+                    "phone": "",
+                    "bonus_balance": 0,
+                    "registration_date": None,
+                    "is_guest": True
+                })
+            
             return JSONResponse({
                 "error": "Пользователь не найден",
                 "code": "USER_NOT_FOUND"
@@ -2174,7 +2260,8 @@ async def get_miniapp_user(telegram_id: int, user_data: dict = Depends(verify_te
             "last_name": user[3] or "",
             "phone": user[4] or "",
             "bonus_balance": user[5] or 0,
-            "registration_date": user[6]
+            "registration_date": user[6],
+            "is_guest": False
         })
         
     except Exception as e:
@@ -2227,24 +2314,22 @@ async def create_miniapp_user(user: UserCreate, user_data: dict = Depends(verify
 @web_app.post("/api/booking/create")
 async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depends(verify_telegram_request)):
     """Создать бронирование из MiniApp"""
+    
+    # Разрешаем создавать бронирования даже гостям
     conn = get_db_connection()
     
     try:
         cursor = conn.cursor()
         
-        # Находим или создаем пользователя
         user_id = None
-        if booking.user_id:
-            # Проверяем существование пользователя
-            cursor.execute('SELECT id FROM users WHERE id = ?', (booking.user_id,))
-            if cursor.fetchone():
-                user_id = booking.user_id
+        telegram_id = user_data.get("id")
+        is_guest = user_data.get("is_guest", True)
         
-        # Если user_id не найден, но есть данные Telegram пользователя
-        if not user_id and user_data and user_data.get('id'):
-            telegram_id = user_data.get('id')
+        # Если пользователь авторизован в Telegram, находим или создаем его
+        if telegram_id and not is_guest:
             cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (telegram_id,))
             user = cursor.fetchone()
+            
             if user:
                 user_id = user[0]
             else:
@@ -2280,7 +2365,7 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
         
         logger.info(f"✅ Бронирование #{booking_id} создано из MiniApp")
         
-        # ========== ОБНОВЛЕННАЯ ЧАСТЬ: Отправляем уведомление администраторам ==========
+        # Отправляем уведомление администраторам
         try:
             bot = Bot(token=BOT_TOKEN)
             
@@ -2289,7 +2374,7 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
             if phone_formatted and len(phone_formatted) > 4:
                 phone_formatted = f"{phone_formatted[:4]}***{phone_formatted[-2:]}"
             
-            # Создаем красивое сообщение для админа
+            # Создаем сообщение
             booking_message = f"""
 🎯 **НОВАЯ БРОНЬ ИЗ MINIAPP!** 🎯
 
@@ -2338,13 +2423,13 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
                 logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
                 
         except Exception as e:
-            logger.error(f"❌ Критическая ошибка отправки уведомлений: {e}")
-        # ========== КОНЕЦ ОБНОВЛЕННОЙ ЧАСТИ ==========
+            logger.error(f"❌ Ошибка отправки уведомлений: {e}")
         
         return JSONResponse({
             "message": "Бронирование создано",
             "booking_id": booking_id,
-            "status": "pending"
+            "status": "pending",
+            "user_id": user_id
         })
         
     except Exception as e:
@@ -2528,7 +2613,8 @@ async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Создаем кнопку для открытия MiniApp
-    keyboard = InlineKeyboardMarkup([[        InlineKeyboardButton(
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
             "🌐 Открыть веб-приложение",
             web_app=WebAppInfo(url=MINIAPP_URL)
         )
