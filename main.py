@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", category=PTBUserWarning)
 load_dotenv()
 
 # Ваш домен для WebApp
-WEBAPP_URL = "https://vovsetyagskie.bothost.ru:8080/webapp.html"
+WEBAPP_URL = "https://vovsetyagskie.bothost.ru/"
 
 logger = logging.getLogger(__name__)
 
@@ -847,3 +847,4 @@ if __name__ == '__main__':
     logger = logging.getLogger(__name__)
 
     main()
+
