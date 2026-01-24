@@ -4,6 +4,7 @@ import json
 import warnings
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+import ssl
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.warnings import PTBUserWarning
@@ -1172,11 +1173,71 @@ class WebAppHandler(BaseHTTPRequestHandler):
         # Отключаем стандартное логирование веб-сервера
         logger.debug(f"HTTP {self.path} - {args}")
 
-def start_web_server(port=8080):
+def start_web_server(port=8443):
     """Запуск веб-сервера в отдельном потоке"""
     server = HTTPServer(('0.0.0.0', port), WebAppHandler)
-    logger.info(f"🌐 Веб-сервер запущен на порту {port}")
-    logger.info(f"📱 Web App доступен по адресу: http://ваш-сервер:{port}/")
+    
+    # Пытаемся создать SSL контекст для HTTPS
+    try:
+        # Создаем самоподписанный сертификат на лету
+        import tempfile
+        import subprocess
+        
+        # Создаем временные файлы для сертификата
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.cnf', delete=False) as config_file:
+            config_file.write(f"""
+            [req]
+            default_bits = 2048
+            prompt = no
+            default_md = sha256
+            x509_extensions = v3_req
+            distinguished_name = dn
+            
+            [dn]
+            C = RU
+            ST = Moscow
+            L = Moscow
+            O = Во Все Тяжкие
+            OU = Premium Hookah
+            CN = vovsetyagskie.bothost.ru
+            emailAddress = admin@vovsetyagskie.bothost.ru
+            
+            [v3_req]
+            subjectAltName = @alt_names
+            
+            [alt_names]
+            DNS.1 = vovsetyagskie.bothost.ru
+            DNS.2 = localhost
+            IP.1 = 127.0.0.1
+            """)
+            config_path = config_file.name
+        
+        # Генерируем сертификат
+        cert_path = '/tmp/cert.pem'
+        key_path = '/tmp/key.pem'
+        
+        subprocess.run([
+            'openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+            '-keyout', key_path, '-out', cert_path,
+            '-days', '365', '-nodes',
+            '-config', config_path
+        ], capture_output=True)
+        
+        # Настраиваем SSL
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certpath=cert_path, keyfile=key_path)
+        
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        
+        logger.info(f"🔐 HTTPS сервер запущен на порту {port}")
+        logger.info(f"📱 Web App доступен по адресу: https://ваш-сервер:{port}/")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось запустить HTTPS: {e}")
+        logger.info(f"🌐 HTTP сервер запущен на порту {port}")
+        logger.info(f"📱 Web App доступен по адресу: http://ваш-сервер:{port}/")
+        logger.info("ℹ️ Для работы в Telegram нужен HTTPS. Используйте ngrok или настройте SSL.")
+    
     server.serve_forever()
 
 
@@ -1252,36 +1313,65 @@ async def start_with_web_app(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await asyncio.sleep(0.3)
     
-    # Получаем IP сервера для Web App
-    import socket
-    try:
-        hostname = socket.gethostname()
-        ip_address = socket.gethostbyname(hostname)
-        web_app_url = f"http://{ip_address}:8080/"
-    except:
-        web_app_url = "http://localhost:8080/"
+    # Генерируем Web App URL - используем существующий домен
+    # Если у вас есть домен, используйте его. Иначе покажем кнопку без Web App
+    web_app_url = "https://vovsetyagskie.bothost.ru/"
     
-    # Основное меню с Web App кнопкой
-    keyboard = [
-        [InlineKeyboardButton("📱 Открыть интерактивное меню", web_app=WebAppInfo(url=web_app_url))],
-        [
-            InlineKeyboardButton("💰 Мой баланс", callback_data="balance"),
-            InlineKeyboardButton("📅 Мои брони", callback_data="my_bookings")
-        ],
-        [
-            InlineKeyboardButton("🎁 Реферальная программа", callback_data="referrals"),
-            InlineKeyboardButton("📞 Контакты", callback_data="contacts")
+    # Проверяем доступность HTTPS
+    import urllib.request
+    try:
+        # Пробуем подключиться к домену
+        urllib.request.urlopen(web_app_url, timeout=5)
+        https_available = True
+    except:
+        https_available = False
+        logger.warning("⚠️ HTTPS домен недоступен. Web App не будет работать.")
+    
+    if https_available:
+        # Если HTTPS доступен, показываем кнопку Web App
+        keyboard = [
+            [InlineKeyboardButton("📱 Открыть интерактивное меню", web_app=WebAppInfo(url=web_app_url))],
+            [
+                InlineKeyboardButton("💰 Мой баланс", callback_data="balance"),
+                InlineKeyboardButton("📅 Мои брони", callback_data="my_bookings")
+            ],
+            [
+                InlineKeyboardButton("🎁 Реферальная программа", callback_data="referrals"),
+                InlineKeyboardButton("📞 Контакты", callback_data="contacts")
+            ]
         ]
-    ]
+        
+        menu_text = "🎯 *Доступные действия:*\n\n" \
+                   "📱 *Интерактивное меню* - полный каталог с бронированием\n" \
+                   "💰 *Баланс* - ваши бонусные баллы\n" \
+                   "📅 *Брони* - история бронирований\n" \
+                   "🎁 *Рефералы* - приглашайте друзей\n" \
+                   "📞 *Контакты* - связь с нами\n\n" \
+                   "💡 *Совет:* Используйте интерактивное меню для удобного просмотра!"
+    else:
+        # Если HTTPS недоступен, показываем альтернативное меню
+        keyboard = [
+            [
+                InlineKeyboardButton("💰 Мой баланс", callback_data="balance"),
+                InlineKeyboardButton("📅 Мои брони", callback_data="my_bookings")
+            ],
+            [
+                InlineKeyboardButton("🎁 Реферальная программа", callback_data="referrals"),
+                InlineKeyboardButton("📞 Контакты", callback_data="contacts")
+            ],
+            [InlineKeyboardButton("📋 Посмотреть меню", callback_data="show_menu")]
+        ]
+        
+        menu_text = "🎯 *Доступные действия:*\n\n" \
+                   "💰 *Баланс* - ваши бонусные баллы\n" \
+                   "📅 *Брони* - история бронирований\n" \
+                   "🎁 *Рефералы* - приглашайте друзей\n" \
+                   "📞 *Контакты* - связь с нами\n" \
+                   "📋 *Меню* - наш каталог\n\n" \
+                   "ℹ️ *Web App временно недоступен*"
     
     msg3 = await update.message.reply_text(
-        "🎯 *Доступные действия:*\n\n"
-        "📱 *Интерактивное меню* - полный каталог с бронированием\n"
-        "💰 *Баланс* - ваши бонусные баллы\n"
-        "📅 *Брони* - история бронирований\n"
-        "🎁 *Рефералы* - приглашайте друзей\n"
-        "📞 *Контакты* - связь с нами\n\n"
-        "💡 *Совет:* Используйте интерактивное меню для удобного просмотра!",
+        menu_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -1433,7 +1523,7 @@ def main():
         logger.info("🚀 Запуск бота...")
         print("=" * 50)
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
-        print("🌐 Web App доступен на порту 8080")
+        print("🌐 Web App доступен на порту 8443 (HTTPS)")
         print("📱 Команды: /start, /admin")
         print("=" * 50)
 
