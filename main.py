@@ -6,7 +6,7 @@ import json
 import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, Bot
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.warnings import PTBUserWarning
 from dotenv import load_dotenv
@@ -69,7 +69,6 @@ if not STATIC_DIR.exists():
 INDEX_FILE = STATIC_DIR / "index.html"
 if not INDEX_FILE.exists():
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
-        # Базовый HTML будет создан позже
         f.write("""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1632,23 +1631,31 @@ if not INDEX_FILE.exists():
                     bookingData.user_id = userData.user_id;
                 }
                 
+                console.log('📤 Отправка бронирования:', bookingData);
+                
                 // Создаем заголовки
                 const headers = {
                     'Content-Type': 'application/json'
                 };
                 
+                // Добавляем данные Telegram если есть
                 if (tg?.initData) {
                     headers['X-Telegram-Init-Data'] = tg.initData;
+                    console.log('📱 Добавлены данные Telegram');
                 }
                 
+                // Отправляем запрос
                 const response = await fetch(`${API_URL}/api/booking/create`, {
                     method: 'POST',
                     headers: headers,
                     body: JSON.stringify(bookingData)
                 });
                 
+                console.log('📥 Ответ сервера:', response.status);
+                
                 if (response.ok) {
                     const result = await response.json();
+                    console.log('✅ Ответ API:', result);
                     
                     showToast('✅ Бронирование отправлено! Мы свяжемся с вами.');
                     
@@ -1663,26 +1670,34 @@ if not INDEX_FILE.exists():
                         await loadUserBookings();
                     }
                     
-                    // Отправляем данные в Telegram если есть
+                    // Отправляем данные в Telegram
                     if (tg) {
                         try {
                             tg.sendData(JSON.stringify({
                                 type: 'booking_created',
-                                booking_id: result.booking_id
+                                booking_id: result.booking_id,
+                                message: 'Бронирование создано!'
                             }));
+                            console.log('📱 Данные отправлены в Telegram');
                         } catch (e) {
-                            console.log('ℹ️ Не удалось отправить данные в Telegram');
+                            console.log('ℹ️ Не удалось отправить данные в Telegram:', e);
                         }
                     }
                     
                 } else {
-                    const error = await response.json();
-                    showToast(error.error || 'Ошибка при отправке');
+                    const errorData = await response.json().catch(() => ({ error: 'Неизвестная ошибка' }));
+                    console.error('❌ Ошибка API:', errorData);
+                    
+                    if (response.status === 401) {
+                        showToast('⚠️ Требуется авторизация. Откройте приложение через Telegram.');
+                    } else {
+                        showToast('❌ Ошибка: ' + (errorData.error || errorData.detail || 'Попробуйте позже'));
+                    }
                 }
                 
             } catch (error) {
-                console.error('❌ Ошибка бронирования:', error);
-                showToast('Ошибка сети. Проверьте подключение.');
+                console.error('❌ Ошибка сети:', error);
+                showToast('❌ Ошибка сети. Проверьте подключение.');
             } finally {
                 // Возвращаем кнопку в исходное состояние
                 submitBtn.disabled = false;
@@ -1691,6 +1706,29 @@ if not INDEX_FILE.exists():
             }
             
             haptic();
+        }
+        
+        // Функция для тестового бронирования (для отладки)
+        async function testBooking() {
+            console.log('🧪 Тестовое бронирование...');
+            
+            // Заполняем тестовые данные
+            document.getElementById('bookingName').value = 'Тестовый Клиент';
+            document.getElementById('bookingPhone').value = '+79991234567';
+            document.getElementById('bookingDate').value = new Date(Date.now() + 86400000).toISOString().split('T')[0]; // Завтра
+            document.getElementById('bookingTime').value = '19:00';
+            document.getElementById('bookingGuests').value = '2';
+            document.getElementById('bookingComment').value = 'Тестовое бронирование из MiniApp';
+            
+            // Показываем секцию бронирования
+            showSection('booking');
+            
+            // Даем пользователю увидеть данные перед отправкой
+            setTimeout(() => {
+                if (confirm('Отправить тестовое бронирование?')) {
+                    submitBooking();
+                }
+            }, 1000);
         }
 
         // Навигация по разделам
@@ -1770,7 +1808,16 @@ if not INDEX_FILE.exists():
         window.loadMenu = loadMenu;
         window.loadUserData = loadUserData;
         window.openLink = openLink;
+        window.testBooking = testBooking;
     </script>
+    
+    <!-- Скрытая кнопка для тестирования -->
+    <div style="position: fixed; bottom: 10px; right: 10px; z-index: 10000;">
+        <button onclick="testBooking()" 
+                style="background: #ff6b6b; color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 24px; cursor: pointer; opacity: 0.3;">
+            🧪
+        </button>
+    </div>
 </body>
 </html>""")
     logger.info("📄 Создан index.html в папке static")
@@ -2185,12 +2232,30 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
     try:
         cursor = conn.cursor()
         
-        # Если указан user_id, проверяем пользователя
-        user_exists = True
+        # Находим или создаем пользователя
+        user_id = None
         if booking.user_id:
+            # Проверяем существование пользователя
             cursor.execute('SELECT id FROM users WHERE id = ?', (booking.user_id,))
-            if not cursor.fetchone():
-                user_exists = False
+            if cursor.fetchone():
+                user_id = booking.user_id
+        
+        # Если user_id не найден, но есть данные Telegram пользователя
+        if not user_id and user_data and user_data.get('id'):
+            telegram_id = user_data.get('id')
+            cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (telegram_id,))
+            user = cursor.fetchone()
+            if user:
+                user_id = user[0]
+            else:
+                # Создаем нового пользователя
+                cursor.execute('''
+                    INSERT INTO users (telegram_id, first_name, last_name, registration_date, balance, bonus_balance)
+                    VALUES (?, ?, ?, datetime('now'), 0, 100)
+                ''', (telegram_id, user_data.get('first_name', ''), user_data.get('last_name', '')))
+                user_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"🆕 Автоматически создан пользователь для бронирования: {telegram_id}")
         
         # Создаем бронирование
         cursor.execute('''
@@ -2200,7 +2265,7 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
             )
             VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?)
         ''', (
-            booking.user_id if user_exists else None,
+            user_id,
             booking.date,
             booking.time,
             booking.guests,
@@ -2215,34 +2280,66 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
         
         logger.info(f"✅ Бронирование #{booking_id} создано из MiniApp")
         
-        # Отправляем уведомление администраторам
+        # ========== ОБНОВЛЕННАЯ ЧАСТЬ: Отправляем уведомление администраторам ==========
         try:
-            from telegram import Bot
             bot = Bot(token=BOT_TOKEN)
             
+            # Форматируем номер телефона
+            phone_formatted = booking.phone
+            if phone_formatted and len(phone_formatted) > 4:
+                phone_formatted = f"{phone_formatted[:4]}***{phone_formatted[-2:]}"
+            
+            # Создаем красивое сообщение для админа
             booking_message = f"""
-🆕 НОВАЯ БРОНЬ ИЗ MINIAPP!
+🎯 **НОВАЯ БРОНЬ ИЗ MINIAPP!** 🎯
 
-📋 ID: #{booking_id}
-👤 Имя: {booking.name}
-📞 Телефон: {booking.phone}
-📅 Дата: {booking.date}
-⏰ Время: {booking.time}
-👥 Гостей: {booking.guests}
-💬 Комментарий: {booking.comment or 'нет'}
-🎯 Источник: MiniApp
+📋 **ID:** #{booking_id}
+👤 **Клиент:** {booking.name}
+📞 **Телефон:** {phone_formatted}
+📅 **Дата:** {booking.date}
+⏰ **Время:** {booking.time}
+👥 **Гостей:** {booking.guests}
+💬 **Комментарий:** {booking.comment or 'Нет'}
+🔗 **Источник:** 🌐 MiniApp
+{'🆔 **User ID:** ' + str(user_id) if user_id else '👤 **Гость (не зарегистрирован)**'}
+
+📊 **Действия:**
+✅ Подтвердить: /confirm_{booking_id}
+❌ Отменить: /cancel_{booking_id}
+📋 Подробнее: /booking_{booking_id}
 """
             
+            # Отправляем всем администраторам
+            successful_sends = 0
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(
                         chat_id=admin_id,
-                        text=booking_message
+                        text=booking_message,
+                        parse_mode='Markdown',
+                        reply_markup=InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_id}"),
+                                InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_booking_{booking_id}")
+                            ],
+                            [
+                                InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_id}")
+                            ]
+                        ])
                     )
+                    successful_sends += 1
+                    logger.info(f"✅ Уведомление отправлено админу {admin_id}")
                 except Exception as e:
-                    logger.error(f"❌ Ошибка уведомления админа {admin_id}: {e}")
+                    logger.error(f"❌ Ошибка отправки админу {admin_id}: {e}")
+            
+            if successful_sends == 0:
+                logger.error("❌ Не удалось отправить уведомление ни одному админу!")
+            else:
+                logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
+                
         except Exception as e:
-            logger.error(f"❌ Ошибка отправки уведомления: {e}")
+            logger.error(f"❌ Критическая ошибка отправки уведомлений: {e}")
+        # ========== КОНЕЦ ОБНОВЛЕННОЙ ЧАСТИ ==========
         
         return JSONResponse({
             "message": "Бронирование создано",
@@ -2431,8 +2528,7 @@ async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Создаем кнопку для открытия MiniApp
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
+    keyboard = InlineKeyboardMarkup([[        InlineKeyboardButton(
             "🌐 Открыть веб-приложение",
             web_app=WebAppInfo(url=MINIAPP_URL)
         )
@@ -2561,6 +2657,174 @@ async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             
     except Exception as e:
         logger.error(f"❌ Ошибка обработки данных от MiniApp: {e}", exc_info=True)
+
+# Обработчик уведомлений для администраторов
+async def notify_admin_new_booking(context: ContextTypes.DEFAULT_TYPE, booking_id: int, booking_data: dict):
+    """Уведомить администратора о новом бронировании"""
+    try:
+        # Форматируем сообщение
+        message = f"""
+🎯 **НОВАЯ БРОНЬ ИЗ MINIAPP!** 🎯
+
+📋 **ID:** #{booking_id}
+👤 **Клиент:** {booking_data['name']}
+📞 **Телефон:** {booking_data['phone']}
+📅 **Дата:** {booking_data['date']}
+⏰ **Время:** {booking_data['time']}
+👥 **Гостей:** {booking_data['guests']}
+💬 **Комментарий:** {booking_data.get('comment', 'Нет')}
+🔗 **Источник:** 🌐 MiniApp
+{'🆔 **User ID:** ' + str(booking_data.get('user_id')) if booking_data.get('user_id') else '👤 **Гость (не зарегистрирован)**'}
+
+📊 **Действия:**
+✅ Подтвердить: /confirm_{booking_id}
+❌ Отменить: /cancel_{booking_id}
+📋 Подробнее: /booking_{booking_id}
+"""
+        
+        # Создаем клавиатуру с кнопками
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_id}"),
+                InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_booking_{booking_id}")
+            ],
+            [
+                InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_id}"),
+                InlineKeyboardButton("👤 Написать", callback_data=f"message_user_{booking_data.get('user_id', 0)}")
+            ]
+        ])
+        
+        # Отправляем всем администраторам
+        successful_sends = 0
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=message,
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
+                )
+                successful_sends += 1
+                logger.info(f"✅ Уведомление о бронировании #{booking_id} отправлено админу {admin_id}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка отправки админу {admin_id}: {e}")
+        
+        if successful_sends > 0:
+            logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
+        else:
+            logger.error("❌ Не удалось отправить уведомление ни одному админу!")
+            
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка отправки уведомления: {e}")
+
+# Обработчики команд для админов
+async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команд админа для быстрых действий с бронированиями"""
+    if not is_admin(update.effective_user.id):
+        return
+    
+    text = update.message.text
+    
+    if text.startswith('/confirm_'):
+        try:
+            booking_id = int(text.replace('/confirm_', ''))
+            from database import Database
+            db = Database()
+            
+            # Подтверждаем бронирование
+            cursor = db.conn.cursor()
+            cursor.execute('UPDATE bookings SET status = ? WHERE id = ?', ('confirmed', booking_id))
+            db.conn.commit()
+            
+            # Получаем информацию о бронировании
+            cursor.execute('SELECT customer_name, customer_phone FROM bookings WHERE id = ?', (booking_id,))
+            booking = cursor.fetchone()
+            
+            if booking:
+                await update.message.reply_text(
+                    f"✅ Бронирование #{booking_id} подтверждено!\n"
+                    f"Клиент: {booking[0]}\n"
+                    f"Телефон: {booking[1]}"
+                )
+                
+                # Уведомляем пользователя если возможно
+                try:
+                    cursor.execute('SELECT user_id FROM bookings WHERE id = ?', (booking_id,))
+                    user_result = cursor.fetchone()
+                    if user_result and user_result[0]:
+                        user_id = user_result[0]
+                        cursor.execute('SELECT telegram_id FROM users WHERE id = ?', (user_id,))
+                        user = cursor.fetchone()
+                        if user and user[0]:
+                            await context.bot.send_message(
+                                chat_id=user[0],
+                                text=f"✅ Ваше бронирование #{booking_id} подтверждено!\n\n"
+                                     f"Ждем вас в указанное время. Спасибо за выбор нашего заведения!"
+                            )
+                except Exception as e:
+                    logger.error(f"Ошибка уведомления пользователя: {e}")
+                    
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            
+    elif text.startswith('/cancel_'):
+        try:
+            booking_id = int(text.replace('/cancel_', ''))
+            from database import Database
+            db = Database()
+            
+            # Отменяем бронирование
+            cursor = db.conn.cursor()
+            cursor.execute('UPDATE bookings SET status = ? WHERE id = ?', ('cancelled', booking_id))
+            db.conn.commit()
+            
+            await update.message.reply_text(f"❌ Бронирование #{booking_id} отменено.")
+            
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            
+    elif text.startswith('/booking_'):
+        try:
+            booking_id = int(text.replace('/booking_', ''))
+            from database import Database
+            db = Database()
+            
+            # Получаем детали бронирования
+            cursor = db.conn.cursor()
+            cursor.execute('''
+                SELECT b.*, u.first_name, u.telegram_id 
+                FROM bookings b 
+                LEFT JOIN users u ON b.user_id = u.id 
+                WHERE b.id = ?
+            ''', (booking_id,))
+            
+            booking = cursor.fetchone()
+            
+            if booking:
+                message = f"""
+📋 **Детали бронирования #{booking_id}**
+
+👤 **Клиент:** {booking[8]} ({booking[9]})
+📅 **Дата:** {booking[2]}
+⏰ **Время:** {booking[3]}
+👥 **Гостей:** {booking[4]}
+💬 **Комментарий:** {booking[5] or 'Нет'}
+📊 **Статус:** {booking[6]}
+🕒 **Создано:** {booking[7]}
+🔗 **Источник:** {booking[10] or 'Неизвестно'}
+"""
+                
+                if booking[11]:  # Имя пользователя
+                    message += f"\n👤 **Пользователь:** {booking[11]}"
+                if booking[12]:  # Telegram ID
+                    message += f"\n📱 **Telegram:** @{booking[12]}"
+                
+                await update.message.reply_text(message, parse_mode='Markdown')
+            else:
+                await update.message.reply_text(f"❌ Бронирование #{booking_id} не найдено.")
+                
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 # КОМАНДА ДЛЯ ОТЛАДКИ MiniApp
 async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2745,7 +3009,13 @@ def setup_handlers(application):
     # 2. Обработчик данных из WebApp
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_miniapp_data))
     
-    # 3. Сначала добавляем ConversationHandler'ы
+    # 3. ОБРАБОТЧИКИ КОМАНД АДМИНА ДЛЯ БРОНИРОВАНИЙ
+    application.add_handler(MessageHandler(
+        filters.Regex(r'^/(confirm|cancel|booking)_\d+$') & admin_filter,
+        handle_admin_command
+    ))
+    
+    # 4. Сначала добавляем ConversationHandler'ы
     application.add_handler(get_user_message_handler())
     application.add_handler(get_broadcast_handler())
     application.add_handler(get_bonus_handler())
@@ -2753,12 +3023,12 @@ def setup_handlers(application):
     application.add_handler(get_booking_cancellation_handler())
     application.add_handler(get_user_search_handler())
     
-    # 4. Обработчики управления меню
+    # 5. Обработчики управления меню
     menu_handlers = get_menu_management_handlers()
     for handler in menu_handlers:
         application.add_handler(handler)
 
-    # 5. ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ
+    # 6. ОБРАБОТЧИКИ ПОЛЬЗОВАТЕЛЯ
     application.add_handler(MessageHandler(filters.Regex("^💰 Мой баланс$") & user_filter, show_balance))
     application.add_handler(MessageHandler(filters.Regex("^🎁 Реферальная программа$") & user_filter, show_referral_info))
     application.add_handler(MessageHandler(filters.Regex("^📋 Мои бронирования$") & user_filter, show_user_bookings))
@@ -2787,7 +3057,7 @@ def setup_handlers(application):
     application.add_handler(get_spend_bonus_handler())
     application.add_handler(get_booking_handler())
 
-    # 6. ОБРАБОТЧИКИ АДМИНИСТРАТОРА
+    # 7. ОБРАБОТЧИКИ АДМИНИСТРАТОРА
     application.add_handler(MessageHandler(filters.Regex("^👥 Список пользователей$") & admin_filter, show_users_list))
     application.add_handler(MessageHandler(filters.Regex("^📊 Статистика$") & admin_filter, show_statistics))
     application.add_handler(MessageHandler(filters.Regex("^📋 Запросы на списание$") & admin_filter, handle_bonus_requests))
@@ -2817,7 +3087,7 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(handle_booking_action, pattern="^(confirm_booking_|cancel_booking_)"))
     application.add_handler(CallbackQueryHandler(handle_bonus_request_action, pattern="^(approve_|reject_)"))
 
-    # 7. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
+    # 8. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
     application.add_handler(CallbackQueryHandler(handle_create_order, pattern="^create_order$"))
     application.add_handler(CallbackQueryHandler(handle_category_selection, pattern="^category_"))
     application.add_handler(CallbackQueryHandler(handle_item_selection, pattern="^item_"))
@@ -2853,17 +3123,17 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(calculate_all_orders, pattern="^calculate_all_orders$"))
     application.add_handler(CallbackQueryHandler(show_shift_status, pattern="^shift_status$"))
 
-    # 8. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
+    # 9. КОМАНДЫ (ДОБАВЛЯЕМ НОВЫЕ ДЛЯ MINIAPP)
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("webapp", open_miniapp))
     application.add_handler(CommandHandler("miniapp", debug_miniapp))
 
-    # 9. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
+    # 10. СПЕЦИАЛЬНЫЕ ОБРАБОТЧИКИ
     application.add_handler(MessageHandler(filters.Regex("^⬅️ Назад$"), handle_back_button))
     application.add_handler(MessageHandler(filters.Regex("^⬅️ В главное меню$"), handle_back_button))
 
-    # 10. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
+    # 11. ОБРАБОТЧИК НЕИЗВЕСТНЫХ СООБЩЕНИЙ (ДОЛЖЕН БЫТЬ ПОСЛЕДНИМ)
     application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unknown_message))
 
 def main():
@@ -2931,4 +3201,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
