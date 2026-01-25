@@ -1913,125 +1913,125 @@ def create_main_tables():
     cursor = conn.cursor()
     
     try:
-        # Таблица пользователей
+        # Удаляем старые таблицы если они были созданы в старой версии
+        cursor.execute("DROP TABLE IF EXISTS bookings_old")
+        cursor.execute("DROP TABLE IF EXISTS users_old")
+        
+        # Таблица пользователей (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id TEXT UNIQUE NOT NULL,
+                telegram_id INTEGER UNIQUE,
                 first_name TEXT,
                 last_name TEXT,
-                username TEXT,
                 phone TEXT,
-                registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                balance INTEGER DEFAULT 0,
                 bonus_balance INTEGER DEFAULT 0,
-                referral_code TEXT UNIQUE,
-                referred_by TEXT,
-                is_admin BOOLEAN DEFAULT FALSE
+                registration_date TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                referred_by INTEGER DEFAULT NULL,
+                total_spent INTEGER DEFAULT 0,
+                total_orders INTEGER DEFAULT 0,
+                FOREIGN KEY (referred_by) REFERENCES users (id)
             )
         ''')
         
-        # Таблица бронирований
+        # Таблица бронирований (из database.py) - ЕДИНАЯ таблица
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bookings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                customer_name TEXT NOT NULL,
-                customer_phone TEXT NOT NULL,
-                booking_date DATE NOT NULL,
-                booking_time TIME NOT NULL,
-                guests INTEGER NOT NULL,
+                customer_name TEXT,
+                customer_phone TEXT,
+                booking_date TEXT,
+                booking_time TEXT,
+                guests INTEGER,
                 comment TEXT,
                 status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TEXT,
                 source TEXT DEFAULT 'bot',
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
         
-        # Таблица бонусных запросов
+        # Таблица бонусных запросов (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bonus_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                amount INTEGER NOT NULL,
-                description TEXT,
+                user_id INTEGER,
+                amount INTEGER,
                 status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                processed_at TIMESTAMP,
-                admin_id INTEGER,
+                created_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
         
-        # Таблица транзакций
+        # Таблица транзакций (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                amount INTEGER NOT NULL,
+                user_id INTEGER,
+                amount INTEGER,
+                type TEXT,
                 description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
         
-        # Таблица заказов
+        # Таблица заказов (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 table_number INTEGER,
-                total_amount INTEGER DEFAULT 0,
+                admin_id INTEGER,
                 status TEXT DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                closed_at TIMESTAMP,
-                shift_id INTEGER,
-                payment_method TEXT,
-                FOREIGN KEY (shift_id) REFERENCES shifts (id)
+                created_at TEXT,
+                closed_at TEXT,
+                payment_method TEXT DEFAULT NULL
             )
         ''')
         
-        # Таблица товаров в заказах
+        # Таблица товаров в заказах (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS order_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_id INTEGER NOT NULL,
-                menu_item_id INTEGER NOT NULL,
-                quantity INTEGER NOT NULL,
-                price INTEGER NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                order_id INTEGER,
+                item_name TEXT,
+                price INTEGER,
+                quantity INTEGER DEFAULT 1,
+                added_at TEXT,
                 FOREIGN KEY (order_id) REFERENCES orders (id)
             )
         ''')
         
-        # Таблица смен
+        # Таблица смен (из database.py)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS shifts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                end_time TIMESTAMP,
+                shift_number INTEGER,
+                month_year TEXT,
+                admin_id INTEGER,
+                opened_at TEXT,
+                closed_at TEXT,
+                total_revenue INTEGER DEFAULT 0,
                 total_orders INTEGER DEFAULT 0,
-                total_amount INTEGER DEFAULT 0,
-                is_open BOOLEAN DEFAULT TRUE
+                status TEXT DEFAULT 'open',
+                FOREIGN KEY (admin_id) REFERENCES users (id)
             )
         ''')
         
-        # Таблица меню
+        # Таблица меню (из database.py)
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS menu (
+            CREATE TABLE IF NOT EXISTS menu_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                category TEXT NOT NULL,
-                price INTEGER NOT NULL,
-                description TEXT,
-                is_available BOOLEAN DEFAULT TRUE,
-                position INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                name TEXT UNIQUE,
+                price INTEGER,
+                category TEXT,
+                is_active BOOLEAN DEFAULT TRUE
             )
         ''')
         
-        # Таблица для хранения ID сообщений для последующего удаления
+        # Таблица для хранения ID сообщений
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2043,6 +2043,35 @@ def create_main_tables():
         
         conn.commit()
         logger.info("✅ Основные таблицы базы данных созданы/проверены")
+        
+        # Переносим данные из старых таблиц если они есть
+        try:
+            # Проверяем старую таблицу bookings (из старой структуры main.py)
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bookings' AND sql LIKE '%customer_name%'")
+            if cursor.fetchone():
+                logger.info("✅ Таблица bookings уже создана с правильной структурой")
+            else:
+                # Создаем таблицу заново
+                cursor.execute("DROP TABLE IF EXISTS bookings_temp")
+                cursor.execute('''
+                    CREATE TABLE bookings_temp (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        customer_name TEXT,
+                        customer_phone TEXT,
+                        booking_date TEXT,
+                        booking_time TEXT,
+                        guests INTEGER,
+                        comment TEXT,
+                        status TEXT DEFAULT 'pending',
+                        created_at TEXT,
+                        source TEXT DEFAULT 'bot',
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                ''')
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Ошибка проверки структуры bookings: {e}")
         
     except Exception as e:
         logger.error(f"❌ Ошибка создания основных таблиц: {e}")
@@ -2433,7 +2462,7 @@ async def get_miniapp_user(telegram_id: int, user_data: dict = Depends(verify_te
     try:
         cursor = conn.cursor()
         
-        # Получаем пользователя из таблицы users
+        # Получаем пользователя из таблицы users (из database.py)
         cursor.execute('''
             SELECT id, telegram_id, first_name, last_name, phone, bonus_balance, registration_date
             FROM users 
@@ -2497,10 +2526,13 @@ async def create_miniapp_user(user: UserCreate, user_data: dict = Depends(verify
             })
         
         # Создаем нового пользователя
+        from datetime import datetime
+        registration_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         cursor.execute('''
-            INSERT INTO users (telegram_id, first_name, last_name, registration_date, balance, bonus_balance)
-            VALUES (?, ?, ?, datetime('now'), 0, 100)
-        ''', (user.user_id, user.first_name, user.last_name))
+            INSERT INTO users (telegram_id, first_name, last_name, phone, bonus_balance, registration_date)
+            VALUES (?, ?, ?, ?, 100, ?)
+        ''', (user.user_id, user.first_name, user.last_name, "", registration_date))
         
         user_id = cursor.lastrowid
         conn.commit()
@@ -2542,36 +2574,55 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
                 user_id = user[0]
             else:
                 # Создаем нового пользователя
+                from datetime import datetime
+                registration_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
                 cursor.execute('''
-                    INSERT INTO users (telegram_id, first_name, registration_date, balance, bonus_balance)
-                    VALUES (?, ?, datetime('now'), 0, 100)
-                ''', (telegram_id, user_data.get('first_name', 'Пользователь')))
+                    INSERT INTO users (telegram_id, first_name, last_name, phone, bonus_balance, registration_date)
+                    VALUES (?, ?, ?, ?, 100, ?)
+                ''', (telegram_id, user_data.get('first_name', 'Пользователь'), "", "", registration_date))
                 user_id = cursor.lastrowid
                 conn.commit()
                 logger.info(f"🆕 Автоматически создан пользователь: {telegram_id}")
         
-        # Создаем бронирование
+        # Создаем бронирование в ЕДИНОЙ таблице bookings
+        from datetime import datetime
+        created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Преобразуем количество гостей из строки в число
+        guests_num = 2
+        try:
+            if "-" in booking.guests:
+                guests_num = int(booking.guests.split("-")[-1].replace("+", "").strip())
+            elif "+" in booking.guests:
+                guests_num = int(booking.guests.replace("+", "").strip())
+            else:
+                guests_num = int(booking.guests)
+        except:
+            guests_num = 2
+        
         cursor.execute('''
             INSERT INTO bookings (
-                user_id, booking_date, booking_time, guests, comment, 
-                status, created_at, source, customer_name, customer_phone
+                user_id, customer_name, customer_phone, booking_date, booking_time, guests, comment, 
+                status, created_at, source
             )
-            VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         ''', (
             user_id,
+            booking.name,
+            booking.phone,
             booking.date,
             booking.time,
-            booking.guests,
+            guests_num,
             booking.comment,
-            booking.source,
-            booking.name,
-            booking.phone
+            created_at,
+            booking.source
         ))
         
         booking_id = cursor.lastrowid
         conn.commit()
         
-        logger.info(f"✅ Бронирование #{booking_id} создано")
+        logger.info(f"✅ Бронирование #{booking_id} создано в единой таблице")
         
         # Отправляем уведомление администраторам - ИСПРАВЛЕННАЯ ВЕРСИЯ
         try:
@@ -2591,7 +2642,7 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
 📞 Телефон: {phone_display}
 📅 Дата: {booking.date}
 ⏰ Время: {booking.time}
-👥 Гостей: {booking.guests}
+👥 Гостей: {guests_num}
 💬 Комментарий: {booking.comment or 'Нет'}
 🔗 Источник: 🌐 MiniApp"""
             
@@ -2893,14 +2944,16 @@ async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                 else:
                     guests_num = int(guests_str)
                 
-                # Создаем бронирование
+                # Создаем бронирование в ЕДИНОЙ таблице
                 booking_id = db.create_booking(
                     user_id=user_id,
-                    booking_date=parsed_data.get('date'),
-                    booking_time=parsed_data.get('time'),
+                    customer_name=new_name,
+                    customer_phone=new_phone,
+                    date=parsed_data.get('date'),
+                    time=parsed_data.get('time'),
                     guests=guests_num,
                     comment=parsed_data.get('comment', ''),
-                    status='pending'
+                    source='miniapp'
                 )
                 
                 if booking_id:
@@ -2914,25 +2967,7 @@ async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                         parse_mode='Markdown'
                     )
                     
-                    # Уведомляем администраторов
-                    for admin_id in ADMIN_IDS:
-                        try:
-                            await context.bot.send_message(
-                                chat_id=admin_id,
-                                text=f"🆕 НОВАЯ БРОНЬ ИЗ MINIAPP (через бота)!\n\n"
-                                     f"👤 Пользователь: {new_name}\n"
-                                     f"📱 ID: {user_id}\n"
-                                     f"📞 Телефон: {new_phone}\n"
-                                     f"📅 Дата: {parsed_data.get('date')}\n"
-                                     f"⏰ Время: {parsed_data.get('time')}\n"
-                                     f"👥 Гостей: {guests_num}\n"
-                                     f"💬 Комментарий: {parsed_data.get('comment', 'нет')}\n\n"
-                                     f"ID брони: #{booking_id}"
-                            )
-                        except Exception as e:
-                            logger.error(f"❌ Ошибка уведомления админа {admin_id}: {e}")
-                    
-                    logger.info(f"✅ Бронирование #{booking_id} создано для пользователя {user_id}")
+                    logger.info(f"✅ Бронирование #{booking_id} создано для пользователя {user_id} через бота")
                 else:
                     await update.effective_message.reply_text(
                         "❌ Произошла ошибка при создании бронирования. Попробуйте позже."
@@ -3044,13 +3079,14 @@ async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
             db = Database()
             
             # Подтверждаем бронирование
-            cursor = db.conn.cursor()
-            cursor.execute('UPDATE bookings SET status = ? WHERE id = ?', ('confirmed', booking_id))
-            db.conn.commit()
+            db.update_booking_status(booking_id, 'confirmed')
             
             # Получаем информацию о бронировании
+            conn = get_db_connection()
+            cursor = conn.cursor()
             cursor.execute('SELECT customer_name, customer_phone FROM bookings WHERE id = ?', (booking_id,))
             booking = cursor.fetchone()
+            conn.close()
             
             if booking:
                 await update.message.reply_text(
@@ -3061,15 +3097,18 @@ async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 
                 # Уведомляем пользователя если возможно
                 try:
+                    from database import Database
+                    db = Database()
+                    
+                    # Получаем user_id из бронирования
                     cursor.execute('SELECT user_id FROM bookings WHERE id = ?', (booking_id,))
                     user_result = cursor.fetchone()
                     if user_result and user_result[0]:
                         user_id = user_result[0]
-                        cursor.execute('SELECT telegram_id FROM users WHERE id = ?', (user_id,))
-                        user = cursor.fetchone()
-                        if user and user[0]:
+                        user = db.get_user_by_id(user_id)
+                        if user and user[1]:  # telegram_id
                             await context.bot.send_message(
-                                chat_id=user[0],
+                                chat_id=user[1],
                                 text=f"✅ Ваше бронирование #{booking_id} подтверждено!\n\n"
                                      f"Ждем вас в указанное время. Спасибо за выбор нашего заведения!"
                             )
@@ -3086,9 +3125,7 @@ async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
             db = Database()
             
             # Отменяем бронирование
-            cursor = db.conn.cursor()
-            cursor.execute('UPDATE bookings SET status = ? WHERE id = ?', ('cancelled', booking_id))
-            db.conn.commit()
+            db.update_booking_status(booking_id, 'cancelled')
             
             await update.message.reply_text(f"❌ Бронирование #{booking_id} отменено.")
             
@@ -3098,11 +3135,11 @@ async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text.startswith('/booking_'):
         try:
             booking_id = int(text.replace('/booking_', ''))
-            from database import Database
-            db = Database()
             
-            # Получаем детали бронирования
-            cursor = db.conn.cursor()
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Получаем детали бронирования из ЕДИНОЙ таблицы
             cursor.execute('''
                 SELECT b.*, u.first_name, u.telegram_id 
                 FROM bookings b 
@@ -3116,20 +3153,20 @@ async def handle_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 message = f"""
 📋 **Детали бронирования #{booking_id}**
 
-👤 **Клиент:** {booking[8]} ({booking[9]})
-📅 **Дата:** {booking[2]}
-⏰ **Время:** {booking[3]}
-👥 **Гостей:** {booking[4]}
-💬 **Комментарий:** {booking[5] or 'Нет'}
-📊 **Статус:** {booking[6]}
-🕒 **Создано:** {booking[7]}
+👤 **Клиент:** {booking[2]} ({booking[3]})
+📅 **Дата:** {booking[4]}
+⏰ **Время:** {booking[5]}
+👥 **Гостей:** {booking[6]}
+💬 **Комментарий:** {booking[7] or 'Нет'}
+📊 **Статус:** {booking[8]}
+🕒 **Создано:** {booking[9]}
 🔗 **Источник:** {booking[10] or 'Неизвестно'}
 """
                 
-                if booking[11]:  # Имя пользователя
-                    message += f"\n👤 **Пользователь:** {booking[11]}"
-                if booking[12]:  # Telegram ID
-                    message += f"\n📱 **Telegram:** @{booking[12]}"
+                if booking[12]:  # Имя пользователя
+                    message += f"\n👤 **Пользователь:** {booking[12]}"
+                if booking[13]:  # Telegram ID
+                    message += f"\n📱 **Telegram:** @{booking[13]}"
                 
                 await update.message.reply_text(message, parse_mode='Markdown')
             else:
@@ -3156,7 +3193,7 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor = conn.cursor()
     
     # Проверяем существование таблиц
-    tables = ['miniapp_menu', 'miniapp_config', 'miniapp_gallery']
+    tables = ['miniapp_menu', 'miniapp_config', 'miniapp_gallery', 'bookings', 'users']
     table_status = {}
     
     for table in tables:
@@ -3167,6 +3204,8 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_count = cursor.execute("SELECT COUNT(*) FROM miniapp_menu").fetchone()[0]
     config_count = cursor.execute("SELECT COUNT(*) FROM miniapp_config").fetchone()[0]
     gallery_count = cursor.execute("SELECT COUNT(*) FROM miniapp_gallery").fetchone()[0]
+    bookings_count = cursor.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    users_count = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     
     conn.close()
     
@@ -3178,7 +3217,7 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "port": 3000,
         "threads": threading.active_count(),
         "tables": "\n".join([f"  • {table}: {status}" for table, status in table_status.items()]),
-        "records": f"Меню: {menu_count}, Конфиг: {config_count}, Галерея: {gallery_count}"
+        "records": f"Меню: {menu_count}, Конфиг: {config_count}, Галерея: {gallery_count}, Бронирования: {bookings_count}, Пользователи: {users_count}"
     }
     
     message = "🔧 **Отладка MiniApp**\n\n"
@@ -3456,11 +3495,11 @@ def main():
             logger.error("❌ Токен бота не найден! Проверьте файл .env")
             return
 
-        # Создаем основные таблицы для бота
-        logger.info("🔄 Создание/проверка основных таблиц базы данных...")
+        # Создаем основные таблицы для бота - ОДНА единая база данных
+        logger.info("🔄 Создание/проверка единой структуры базы данных...")
         create_main_tables()
         
-        # Создаем таблицы для MiniApp
+        # Создаем таблицы для MiniApp (дополнительные)
         logger.info("🔄 Создание/проверка таблиц MiniApp...")
         create_miniapp_tables()
         
