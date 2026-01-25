@@ -2963,27 +2963,40 @@ async def handle_miniapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def notify_admin_new_booking(context: ContextTypes.DEFAULT_TYPE, booking_id: int, booking_data: dict):
     """Уведомить администратора о новом бронировании"""
     try:
-        # Форматируем сообщение
-        message = f"""
-🎯 **НОВАЯ БРОНЬ ИЗ MINIAPP!** 🎯
+        # Форматируем номер телефона для безопасности
+        phone_display = booking_data['phone']
+        if phone_display and len(phone_display) > 4:
+            # Оставляем только первые 4 и последние 2 цифры
+            phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
+        
+        # Создаем сообщение
+        booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
 
-📋 **ID:** #{booking_id}
-👤 **Клиент:** {booking_data['name']}
-📞 **Телефон:** {booking_data['phone']}
-📅 **Дата:** {booking_data['date']}
-⏰ **Время:** {booking_data['time']}
-👥 **Гостей:** {booking_data['guests']}
-💬 **Комментарий:** {booking_data.get('comment', 'Нет')}
-🔗 **Источник:** 🌐 MiniApp
-{'🆔 **User ID:** ' + str(booking_data.get('user_id')) if booking_data.get('user_id') else '👤 **Гость (не зарегистрирован)**'}
+📋 ID: #{booking_id}
+👤 Клиент: {booking_data['name']}
+📞 Телефон: {phone_display}
+📅 Дата: {booking_data['date']}
+⏰ Время: {booking_data['time']}
+👥 Гостей: {booking_data['guests']}
+💬 Комментарий: {booking_data.get('comment', 'Нет')}
+🔗 Источник: 🌐 MiniApp"""
+        
+        # Добавляем информацию о пользователе если есть
+        if booking_data.get('user_id'):
+            booking_message += f"\n🆔 User ID: {booking_data['user_id']}"
+        else:
+            booking_message += f"\n👤 Гость (не зарегистрирован)"
+        
+        # Добавляем действия
+        booking_message += f"""
 
-📊 **Действия:**
+📊 Действия:
 ✅ Подтвердить: /confirm_{booking_id}
 ❌ Отменить: /cancel_{booking_id}
 📋 Подробнее: /booking_{booking_id}
 """
         
-        # Создаем клавиатуру с кнопками
+        # Создаем inline-кнопки для удобства
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_id}"),
@@ -2991,7 +3004,6 @@ async def notify_admin_new_booking(context: ContextTypes.DEFAULT_TYPE, booking_i
             ],
             [
                 InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_id}"),
-                InlineKeyboardButton("👤 Написать", callback_data=f"message_user_{booking_data.get('user_id', 0)}")
             ]
         ])
         
@@ -3001,8 +3013,7 @@ async def notify_admin_new_booking(context: ContextTypes.DEFAULT_TYPE, booking_i
             try:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=message,
-                    parse_mode='Markdown',
+                    text=booking_message,
                     reply_markup=keyboard
                 )
                 successful_sends += 1
@@ -3013,7 +3024,7 @@ async def notify_admin_new_booking(context: ContextTypes.DEFAULT_TYPE, booking_i
         if successful_sends > 0:
             logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
         else:
-            logger.error("❌ Не удалось отправить уведомление ни одному админу!")
+            logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
             
     except Exception as e:
         logger.error(f"❌ Критическая ошибка отправки уведомления: {e}")
