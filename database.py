@@ -58,6 +58,8 @@ class Database:
             CREATE TABLE IF NOT EXISTS bookings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
+                customer_name TEXT,
+                customer_phone TEXT,
                 booking_date TEXT,
                 booking_time TEXT,
                 guests INTEGER,
@@ -65,8 +67,6 @@ class Database:
                 status TEXT DEFAULT 'pending',
                 created_at TEXT,
                 source TEXT DEFAULT 'bot',
-                customer_name TEXT,
-                customer_phone TEXT,
                 FOREIGN KEY (user_id) REFERENCES users (id)
             )
         ''')
@@ -637,9 +637,9 @@ class Database:
         
         try:
             cursor.execute('''
-                INSERT INTO bookings (user_id, booking_date, booking_time, guests, comment, status, created_at, source, customer_name, customer_phone)
-                VALUES (?, ?, ?, ?, ?, 'pending', datetime('now'), ?, ?, ?)
-            ''', (user_id, date, time, guests, comment, source, name, phone))
+                INSERT INTO bookings (user_id, customer_name, customer_phone, booking_date, booking_time, guests, comment, status, created_at, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            ''', (user_id, name, phone, date, time, guests, comment, self.get_moscow_time(), source))
             
             booking_id = cursor.lastrowid
             self.conn.commit()
@@ -676,11 +676,12 @@ class Database:
         try:
             cursor.execute('''
                 INSERT INTO users (telegram_id, first_name, last_name, registration_date, bonus_balance)
-                VALUES (?, ?, ?, datetime('now'), 0)
+                VALUES (?, ?, ?, ?, 0)
             ''', (
                 telegram_user.get('id'),
                 telegram_user.get('first_name', ''),
-                telegram_user.get('last_name', '')
+                telegram_user.get('last_name', ''),
+                self.get_moscow_time()
             ))
             user_id = cursor.lastrowid
             self.conn.commit()
@@ -688,6 +689,75 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка создания пользователя: {e}")
             return None
+
+    # ========== МЕТОДЫ ДЛЯ БРОНИРОВАНИЙ (ИСПРАВЛЕННЫЕ) ==========
+
+    def create_booking(self, user_id, date, time, guests, comment='', source='bot', customer_name='', customer_phone=''):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO bookings (user_id, customer_name, customer_phone, booking_date, booking_time, guests, comment, created_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, customer_name, customer_phone, date, time, guests, comment, self.get_moscow_time(), source))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_bookings_by_status(self, status):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
+            FROM bookings b 
+            LEFT JOIN users u ON b.user_id = u.id 
+            WHERE b.status = ?
+            ORDER BY b.booking_date, b.booking_time
+        ''', (status,))
+        return cursor.fetchall()
+
+    def get_bookings_by_date(self, date):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
+            FROM bookings b 
+            LEFT JOIN users u ON b.user_id = u.id 
+            WHERE b.booking_date = ?
+            ORDER BY b.booking_time
+        ''', (date,))
+        return cursor.fetchall()
+
+    def get_all_bookings_sorted(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
+            FROM bookings b 
+            LEFT JOIN users u ON b.user_id = u.id 
+            ORDER BY b.booking_date, b.booking_time
+        ''')
+        return cursor.fetchall()
+
+    def get_booking_stats(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT 
+                status,
+                COUNT(*) as count
+            FROM bookings 
+            GROUP BY status
+        ''')
+        stats = cursor.fetchall()
+
+        stats_dict = {}
+        total = 0
+        for status, count in stats:
+            stats_dict[status] = count
+            total += count
+
+        stats_dict['total'] = total
+        return stats_dict
+
+    def update_booking_status(self, booking_id, status):
+        cursor = self.conn.cursor()
+        cursor.execute('UPDATE bookings SET status = ? WHERE id = ?', (status, booking_id))
+        self.conn.commit()
+        return True
 
     # ========== СУЩЕСТВУЮЩИЕ МЕТОДЫ (сохраняем все из вашего файла) ==========
 
@@ -735,15 +805,6 @@ class Database:
             VALUES (?, ?, ?, ?, ?)
         ''', (user_id, amount, transaction_type, description, self.get_moscow_time()))
         self.conn.commit()
-
-    def create_booking(self, user_id, date, time, guests, comment='', source='bot', customer_name='', customer_phone=''):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO bookings (user_id, booking_date, booking_time, guests, comment, created_at, source, customer_name, customer_phone)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (user_id, date, time, guests, comment, self.get_moscow_time(), source, customer_name, customer_phone))
-        self.conn.commit()
-        return cursor.lastrowid
 
     def create_bonus_request(self, user_id, amount):
         cursor = self.conn.cursor()
@@ -822,58 +883,6 @@ class Database:
                 return referrer_id, REFERRAL_BONUS
 
         return None, 0
-
-    def get_bookings_by_status(self, status):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
-            FROM bookings b 
-            JOIN users u ON b.user_id = u.id 
-            WHERE b.status = ?
-            ORDER BY b.booking_date, b.booking_time
-        ''', (status,))
-        return cursor.fetchall()
-
-    def get_bookings_by_date(self, date):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
-            FROM bookings b 
-            JOIN users u ON b.user_id = u.id 
-            WHERE b.booking_date = ?
-            ORDER BY b.booking_time
-        ''', (date,))
-        return cursor.fetchall()
-
-    def get_all_bookings_sorted(self):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT b.*, u.first_name, u.last_name, u.phone, u.telegram_id
-            FROM bookings b 
-            JOIN users u ON b.user_id = u.id 
-            ORDER BY b.booking_date, b.booking_time
-        ''')
-        return cursor.fetchall()
-
-    def get_booking_stats(self):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT 
-                status,
-                COUNT(*) as count
-            FROM bookings 
-            GROUP BY status
-        ''')
-        stats = cursor.fetchall()
-
-        stats_dict = {}
-        total = 0
-        for status, count in stats:
-            stats_dict[status] = count
-            total += count
-
-        stats_dict['total'] = total
-        return stats_dict
 
     def get_booking_dates(self):
         cursor = self.conn.cursor()
