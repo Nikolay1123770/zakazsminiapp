@@ -2573,56 +2573,72 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
         
         logger.info(f"✅ Бронирование #{booking_id} создано")
         
-        # Отправляем уведомление администраторам
+        # Отправляем уведомление администраторам - ИСПРАВЛЕННАЯ ВЕРСИЯ
         try:
             bot = Bot(token=BOT_TOKEN)
             
-            # Форматируем номер телефона
-            phone_formatted = booking.phone
-            if phone_formatted and len(phone_formatted) > 4:
-                phone_formatted = f"{phone_formatted[:4]}***{phone_formatted[-2:]}"
+            # Форматируем номер телефона для безопасности
+            phone_display = booking.phone
+            if phone_display and len(phone_display) > 4:
+                # Оставляем только первые 4 и последние 2 цифры
+                phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
             
-            # Создаем сообщение
-            booking_message = f"""
-🎯 **НОВАЯ БРОНЬ ИЗ MINIAPP!** 🎯
+            # Создаем БЕЗОПАСНОЕ сообщение без Markdown
+            booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
 
-📋 **ID:** #{booking_id}
-👤 **Клиент:** {booking.name}
-📞 **Телефон:** {phone_formatted}
-📅 **Дата:** {booking.date}
-⏰ **Время:** {booking.time}
-👥 **Гостей:** {booking.guests}
-💬 **Комментарий:** {booking.comment or 'Нет'}
-🔗 **Источник:** 🌐 MiniApp
-{'🆔 **User ID:** ' + str(user_id) if user_id else '👤 **Гость (не зарегистрирован)**'}
+📋 ID: #{booking_id}
+👤 Клиент: {booking.name}
+📞 Телефон: {phone_display}
+📅 Дата: {booking.date}
+⏰ Время: {booking.time}
+👥 Гостей: {booking.guests}
+💬 Комментарий: {booking.comment or 'Нет'}
+🔗 Источник: 🌐 MiniApp"""
+            
+            # Добавляем информацию о пользователе если есть
+            if user_id:
+                booking_message += f"\n🆔 User ID: {user_id}"
+            else:
+                booking_message += f"\n👤 Гость (не зарегистрирован)"
+            
+            # Добавляем действия (без Markdown форматирования)
+            booking_message += f"""
 
-📊 **Действия:**
+📊 Действия:
 ✅ Подтвердить: /confirm_{booking_id}
 ❌ Отменить: /cancel_{booking_id}
 📋 Подробнее: /booking_{booking_id}
 """
             
-            # Отправляем всем администраторам
+            # Отправляем всем администраторам (без parse_mode)
             successful_sends = 0
+            failed_admin_ids = []
+            
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(
                         chat_id=admin_id,
-                        text=booking_message,
-                        parse_mode='Markdown'
+                        text=booking_message
+                        # УБИРАЕМ parse_mode='Markdown' чтобы избежать ошибок парсинга
                     )
                     successful_sends += 1
                     logger.info(f"✅ Уведомление отправлено админу {admin_id}")
                 except Exception as e:
                     logger.error(f"❌ Ошибка отправки админу {admin_id}: {e}")
+                    failed_admin_ids.append(str(admin_id))
             
-            if successful_sends == 0:
-                logger.error("❌ Не удалось отправить уведомление ни одному админу!")
-            else:
+            if successful_sends > 0:
                 logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
+                
+                # Если были неудачи, логируем
+                if failed_admin_ids:
+                    logger.warning(f"⚠️ Не удалось отправить уведомления админам: {', '.join(failed_admin_ids)}")
+            else:
+                logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
                 
         except Exception as e:
             logger.error(f"❌ Ошибка отправки уведомлений: {e}")
+            # Не падаем, просто логируем ошибку
         
         return JSONResponse({
             "message": "Бронирование создано",
