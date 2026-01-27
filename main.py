@@ -2551,6 +2551,8 @@ async def create_miniapp_user(user: UserCreate, user_data: dict = Depends(verify
     finally:
         conn.close()
 
+# Замените функцию create_miniapp_booking на эту версию:
+
 @web_app.post("/api/booking/create")
 async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depends(verify_telegram_request)):
     """Создать бронирование из MiniApp"""
@@ -2577,7 +2579,7 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
                 from datetime import datetime
                 registration_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 
-                cursor.execute('''
+                cursor.execute(''' 
                     INSERT INTO users (telegram_id, first_name, last_name, phone, bonus_balance, registration_date)
                     VALUES (?, ?, ?, ?, 100, ?)
                 ''', (telegram_id, user_data.get('first_name', 'Пользователь'), "", "", registration_date))
@@ -2624,72 +2626,127 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
         
         logger.info(f"✅ Бронирование #{booking_id} создано в единой таблице")
         
-        # Отправляем уведомление администраторам - ИСПРАВЛЕННАЯ ВЕРСИЯ
-        try:
-            bot = Bot(token=BOT_TOKEN)
-            
-            # Форматируем номер телефона для безопасности
-            phone_display = booking.phone
-            if phone_display and len(phone_display) > 4:
-                # Оставляем только первые 4 и последние 2 цифры
-                phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
-            
-            # Создаем БЕЗОПАСНОЕ сообщение без Markdown
-            booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
+        # СОЗДАЕМ ДАННЫЕ ДЛЯ УВЕДОМЛЕНИЯ АДМИНА
+        booking_data_for_admin = {
+            'booking_id': booking_id,
+            'name': booking.name,
+            'phone': booking.phone,
+            'date': booking.date,
+            'time': booking.time,
+            'guests': guests_num,
+            'comment': booking.comment or '',
+            'source': booking.source,
+            'user_id': user_id,
+            'created_at': created_at
+        }
+        
+        # Отправляем уведомление администраторам через существующую функцию
+        await send_admin_notification(booking_data_for_admin)
+        
+        return JSONResponse({
+            "message": "Бронирование создано",
+            "booking_id": booking_id,
+            "status": "pending",
+            "user_id": user_id
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка создания бронирования: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        conn.close()
 
-📋 ID: #{booking_id}
-👤 Клиент: {booking.name}
+# Добавьте эту новую функцию для отправки уведомлений:
+async def send_admin_notification(booking_data: dict):
+    """Отправить уведомление администраторам о новом бронировании"""
+    try:
+        from config import BOT_TOKEN, ADMIN_IDS
+        from telegram import Bot
+        from telegram.error import TelegramError
+        
+        bot = Bot(token=BOT_TOKEN)
+        
+        # Форматируем номер телефона для безопасности
+        phone_display = booking_data['phone']
+        if phone_display and len(phone_display) > 4:
+            phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
+        
+        # Создаем сообщение
+        booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
+
+📋 ID: #{booking_data['booking_id']}
+👤 Клиент: {booking_data['name']}
 📞 Телефон: {phone_display}
-📅 Дата: {booking.date}
-⏰ Время: {booking.time}
-👥 Гостей: {guests_num}
-💬 Комментарий: {booking.comment or 'Нет'}
+📅 Дата: {booking_data['date']}
+⏰ Время: {booking_data['time']}
+👥 Гостей: {booking_data['guests']}
+💬 Комментарий: {booking_data['comment'] or 'Нет'}
 🔗 Источник: 🌐 MiniApp"""
-            
-            # Добавляем информацию о пользователе если есть
-            if user_id:
-                booking_message += f"\n🆔 User ID: {user_id}"
-            else:
-                booking_message += f"\n👤 Гость (не зарегистрирован)"
-            
-            # Добавляем действия (без Markdown форматирования)
-            booking_message += f"""
+        
+        # Добавляем информацию о пользователе если есть
+        if booking_data.get('user_id'):
+            booking_message += f"\n🆔 User ID: {booking_data['user_id']}"
+        else:
+            booking_message += f"\n👤 Гость (не зарегистрирован)"
+        
+        # Добавляем действия
+        booking_message += f"""
 
 📊 Действия:
-✅ Подтвердить: /confirm_{booking_id}
-❌ Отменить: /cancel_{booking_id}
-📋 Подробнее: /booking_{booking_id}
+✅ Подтвердить: /confirm_{booking_data['booking_id']}
+❌ Отменить: /cancel_{booking_data['booking_id']}
+📋 Подробнее: /booking_{booking_data['booking_id']}
 """
-            
-            # Отправляем всем администраторам (без parse_mode)
-            successful_sends = 0
-            failed_admin_ids = []
-            
-            for admin_id in ADMIN_IDS:
-                try:
-                    await bot.send_message(
-                        chat_id=admin_id,
-                        text=booking_message
-                        # УБИРАЕМ parse_mode='Markdown' чтобы избежать ошибок парсинга
-                    )
-                    successful_sends += 1
-                    logger.info(f"✅ Уведомление отправлено админу {admin_id}")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка отправки админу {admin_id}: {e}")
+        
+        # Создаем inline-кнопки для удобства
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_data['booking_id']}"),
+                InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_booking_{booking_data['booking_id']}")
+            ],
+            [
+                InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_data['booking_id']}"),
+            ]
+        ])
+        
+        # Отправляем всем администраторам
+        successful_sends = 0
+        failed_admin_ids = []
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=booking_message,
+                    reply_markup=keyboard
+                )
+                successful_sends += 1
+                logger.info(f"✅ Уведомление отправлено админу {admin_id}")
+            except TelegramError as e:
+                error_message = str(e)
+                if "Chat not found" in error_message or "user is deactivated" in error_message:
+                    logger.warning(f"⚠️ Админ {admin_id} недоступен (заблокировал бота): {error_message}")
                     failed_admin_ids.append(str(admin_id))
+                else:
+                    logger.error(f"❌ Ошибка отправки админу {admin_id}: {error_message}")
+                    failed_admin_ids.append(str(admin_id))
+            except Exception as e:
+                logger.error(f"❌ Неожиданная ошибка при отправке админу {admin_id}: {e}")
+                failed_admin_ids.append(str(admin_id))
+        
+        if successful_sends > 0:
+            logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
             
-            if successful_sends > 0:
-                logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
-                
-                # Если были неудачи, логируем
-                if failed_admin_ids:
-                    logger.warning(f"⚠️ Не удалось отправить уведомления админам: {', '.join(failed_admin_ids)}")
-            else:
-                logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка отправки уведомлений: {e}")
-            # Не падаем, просто логируем ошибку
+            # Если были неудачи, логируем
+            if failed_admin_ids:
+                logger.warning(f"⚠️ Не удалось отправить уведомления админам: {', '.join(failed_admin_ids)}")
+        else:
+            logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
+            
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка отправки уведомления: {e}")
+        # Не падаем, просто логируем ошибку
         
         return JSONResponse({
             "message": "Бронирование создано",
