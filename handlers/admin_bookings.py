@@ -279,19 +279,20 @@ async def show_all_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # Обработка действий с бронированиями
+# В функции handle_booking_action добавьте обработку текстовых команд из MiniApp:
+
 async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка действий с бронированиями"""
     query = update.callback_query
-    if query:
-        await query.answer()
-
-    if query and not is_admin(query.from_user.id):
-        return
-    elif update.message and not is_admin(update.effective_user.id):
-        return
-
+    
     # Обработка inline-кнопок
     if query:
+        await query.answer()
+        user_id = query.from_user.id
+        
+        if not is_admin(user_id):
+            return
+            
         parts = query.data.split('_')
         if len(parts) < 3:
             try:
@@ -312,6 +313,11 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Обработка текстовых команд из MiniApp
     elif update.message and update.message.text:
+        user_id = update.effective_user.id
+        
+        if not is_admin(user_id):
+            return
+            
         text = update.message.text
         # Проверяем команды типа /confirm_123, /cancel_123, /booking_123
         if text.startswith('/confirm_'):
@@ -339,12 +345,8 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as e:
                 if "Message is not modified" not in str(e):
                     logger.error(f"Ошибка при обработке бронирования: {e}")
-                    from message_manager import message_manager
-                    await message_manager.send_message(
-                        update, context,
-                        "❌ Неверный ID бронирования.",
-                        is_temporary=True
-                    )
+        else:
+            await update.message.reply_text("❌ Неверный ID бронирования.")
         return
 
     cursor = db.conn.cursor()
@@ -362,6 +364,14 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
         if query:
             try:
                 await query.edit_message_text("❌ Бронирование не найдено.")
+            except Exception as e:
+                if "Message is not modified" not in str(e):
+                    logger.error(f"Ошибка при обработке бронирования: {e}")
+        else:
+            await update.message.reply_text("❌ Бронирование не найдено.")
+        return
+
+    # ... остальная часть функции остается без изменений ...
             except Exception as e:
                 if "Message is not modified" not in str(e):
                     logger.error(f"Ошибка при обработке бронирования: {e}")
