@@ -1481,7 +1481,7 @@ if not INDEX_FILE.exists():
         async function loadUserBookings() {
             if (!userData?.user_id || userData.is_guest) {
                 console.log('👤 Пользователь гость или нет ID, пропускаем загрузку бронирований');
-                return;
+                return
             }
             
             try {
@@ -2130,6 +2130,98 @@ def verify_telegram_data(init_data: str, bot_token: str) -> bool:
         logger.error(f"❌ Ошибка проверки подписи Telegram: {e}")
         return False
 
+# Функция для отправки уведомлений администраторам
+async def send_admin_notification(booking_data: dict):
+    """Отправить уведомление администраторам о новом бронировании"""
+    try:
+        from config import BOT_TOKEN, ADMIN_IDS
+        from telegram import Bot
+        from telegram.error import TelegramError
+        
+        bot = Bot(token=BOT_TOKEN)
+        
+        # Форматируем номер телефона для безопасности
+        phone_display = booking_data['phone']
+        if phone_display and len(phone_display) > 4:
+            phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
+        
+        # Создаем сообщение
+        booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
+
+📋 ID: #{booking_data['booking_id']}
+👤 Клиент: {booking_data['name']}
+📞 Телефон: {phone_display}
+📅 Дата: {booking_data['date']}
+⏰ Время: {booking_data['time']}
+👥 Гостей: {booking_data['guests']}
+💬 Комментарий: {booking_data['comment'] or 'Нет'}
+🔗 Источник: 🌐 MiniApp"""
+        
+        # Добавляем информацию о пользователе если есть
+        if booking_data.get('user_id'):
+            booking_message += f"\n🆔 User ID: {booking_data['user_id']}"
+        else:
+            booking_message += f"\n👤 Гость (не зарегистрирован)"
+        
+        # Добавляем действия
+        booking_message += f"""
+
+📊 Действия:
+✅ Подтвердить: /confirm_{booking_data['booking_id']}
+❌ Отменить: /cancel_{booking_data['booking_id']}
+📋 Подробнее: /booking_{booking_data['booking_id']}
+"""
+        
+        # Создаем inline-кнопки для удобства
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_data['booking_id']}"),
+                InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_booking_{booking_data['booking_id']}")
+            ],
+            [
+                InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_data['booking_id']}"),
+            ]
+        ])
+        
+        # Отправляем всем администраторам
+        successful_sends = 0
+        failed_admin_ids = []
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=booking_message,
+                    reply_markup=keyboard
+                )
+                successful_sends += 1
+                logger.info(f"✅ Уведомление отправлено админу {admin_id}")
+            except TelegramError as e:
+                error_message = str(e)
+                if "Chat not found" in error_message or "user is deactivated" in error_message:
+                    logger.warning(f"⚠️ Админ {admin_id} недоступен (заблокировал бота): {error_message}")
+                    failed_admin_ids.append(str(admin_id))
+                else:
+                    logger.error(f"❌ Ошибка отправки админу {admin_id}: {error_message}")
+                    failed_admin_ids.append(str(admin_id))
+            except Exception as e:
+                logger.error(f"❌ Неожиданная ошибка при отправке админу {admin_id}: {e}")
+                failed_admin_ids.append(str(admin_id))
+        
+        if successful_sends > 0:
+            logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
+            
+            # Если были неудачи, логируем
+            if failed_admin_ids:
+                logger.warning(f"⚠️ Не удалось отправить уведомления админам: {', '.join(failed_admin_ids)}")
+        else:
+            logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
+            
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка отправки уведомления: {e}")
+        # Не падаем, просто логируем ошибку
+
 # Создаем FastAPI приложение для MiniApp
 web_app = FastAPI(title="Vovsetyagskie MiniApp API")
 
@@ -2551,15 +2643,14 @@ async def create_miniapp_user(user: UserCreate, user_data: dict = Depends(verify
     finally:
         conn.close()
 
-# Замените функцию create_miniapp_booking на эту версию:
-
 @web_app.post("/api/booking/create")
 async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depends(verify_telegram_request)):
     """Создать бронирование из MiniApp"""
     
-    conn = get_db_connection()
+    conn = None  # Добавляем объявление переменной
     
     try:
+        conn = get_db_connection()  # Получаем соединение с БД
         cursor = conn.cursor()
         
         user_id = None
@@ -2654,112 +2745,8 @@ async def create_miniapp_booking(booking: BookingCreate, user_data: dict = Depen
         logger.error(f"❌ Ошибка создания бронирования: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
     finally:
-        conn.close()
-
-# Добавьте эту новую функцию для отправки уведомлений:
-async def send_admin_notification(booking_data: dict):
-    """Отправить уведомление администраторам о новом бронировании"""
-    try:
-        from config import BOT_TOKEN, ADMIN_IDS
-        from telegram import Bot
-        from telegram.error import TelegramError
-        
-        bot = Bot(token=BOT_TOKEN)
-        
-        # Форматируем номер телефона для безопасности
-        phone_display = booking_data['phone']
-        if phone_display and len(phone_display) > 4:
-            phone_display = f"{phone_display[:4]}***{phone_display[-2:]}"
-        
-        # Создаем сообщение
-        booking_message = f"""🎯 НОВАЯ БРОНЬ ИЗ MINIAPP! 🎯
-
-📋 ID: #{booking_data['booking_id']}
-👤 Клиент: {booking_data['name']}
-📞 Телефон: {phone_display}
-📅 Дата: {booking_data['date']}
-⏰ Время: {booking_data['time']}
-👥 Гостей: {booking_data['guests']}
-💬 Комментарий: {booking_data['comment'] or 'Нет'}
-🔗 Источник: 🌐 MiniApp"""
-        
-        # Добавляем информацию о пользователе если есть
-        if booking_data.get('user_id'):
-            booking_message += f"\n🆔 User ID: {booking_data['user_id']}"
-        else:
-            booking_message += f"\n👤 Гость (не зарегистрирован)"
-        
-        # Добавляем действия
-        booking_message += f"""
-
-📊 Действия:
-✅ Подтвердить: /confirm_{booking_data['booking_id']}
-❌ Отменить: /cancel_{booking_data['booking_id']}
-📋 Подробнее: /booking_{booking_data['booking_id']}
-"""
-        
-        # Создаем inline-кнопки для удобства
-        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_booking_{booking_data['booking_id']}"),
-                InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_booking_{booking_data['booking_id']}")
-            ],
-            [
-                InlineKeyboardButton("📋 Подробнее", callback_data=f"info_booking_{booking_data['booking_id']}"),
-            ]
-        ])
-        
-        # Отправляем всем администраторам
-        successful_sends = 0
-        failed_admin_ids = []
-        
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    chat_id=admin_id,
-                    text=booking_message,
-                    reply_markup=keyboard
-                )
-                successful_sends += 1
-                logger.info(f"✅ Уведомление отправлено админу {admin_id}")
-            except TelegramError as e:
-                error_message = str(e)
-                if "Chat not found" in error_message or "user is deactivated" in error_message:
-                    logger.warning(f"⚠️ Админ {admin_id} недоступен (заблокировал бота): {error_message}")
-                    failed_admin_ids.append(str(admin_id))
-                else:
-                    logger.error(f"❌ Ошибка отправки админу {admin_id}: {error_message}")
-                    failed_admin_ids.append(str(admin_id))
-            except Exception as e:
-                logger.error(f"❌ Неожиданная ошибка при отправке админу {admin_id}: {e}")
-                failed_admin_ids.append(str(admin_id))
-        
-        if successful_sends > 0:
-            logger.info(f"✅ Уведомления отправлены {successful_sends} администраторам")
-            
-            # Если были неудачи, логируем
-            if failed_admin_ids:
-                logger.warning(f"⚠️ Не удалось отправить уведомления админам: {', '.join(failed_admin_ids)}")
-        else:
-            logger.error(f"❌ Не удалось отправить уведомление ни одному админу!")
-            
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка отправки уведомления: {e}")
-        # Не падаем, просто логируем ошибку
-        
-        return JSONResponse({
-            "message": "Бронирование создано",
-            "booking_id": booking_id,
-            "status": "pending",
-            "user_id": user_id
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка создания бронирования: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-    finally:
-        conn.close()
+        if conn:  # Проверяем, что соединение было создано
+            conn.close()  # Закрываем соединение
 
 @web_app.get("/api/gallery")
 async def get_miniapp_gallery():
@@ -2878,13 +2865,13 @@ def run_web_server():
         config = uvicorn.Config(
             web_app, 
             host="0.0.0.0", 
-            port=3000,
+            port=8080,  # Изменено с 3000 на 8080
             log_level="info",
             access_log=True,
             reload=False
         )
         server = uvicorn.Server(config)
-        logger.info("🌐 Веб-сервер MiniApp запущен на порту 3000")
+        logger.info("🌐 Веб-сервер MiniApp запущен на порту 8080")
         loop.run_until_complete(server.serve())
     except Exception as e:
         logger.error(f"❌ Ошибка веб-сервера: {e}")
@@ -2936,8 +2923,7 @@ async def open_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Создаем кнопку для открытия MiniApp
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton(
+    keyboard = InlineKeyboardMarkup([[        InlineKeyboardButton(
             "🌐 Открыть веб-приложение",
             web_app=WebAppInfo(url=MINIAPP_URL)
         )
@@ -3271,7 +3257,7 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "mini_app_url": MINIAPP_URL or "Не настроен",
         "static_dir": str(STATIC_DIR.absolute()),
         "index_file_exists": "✅ да" if INDEX_FILE.exists() else "❌ нет",
-        "port": 3000,
+        "port": 8080,
         "threads": threading.active_count(),
         "tables": "\n".join([f"  • {table}: {status}" for table, status in table_status.items()]),
         "records": f"Меню: {menu_count}, Конфиг: {config_count}, Галерея: {gallery_count}, Бронирования: {bookings_count}, Пользователи: {users_count}"
@@ -3301,8 +3287,7 @@ async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_T
             )
         else:
             # Предлагаем открыть MiniApp или показать меню
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🌐 Открыть веб-приложение", callback_data="open_miniapp"),
+            keyboard = InlineKeyboardMarkup([[                InlineKeyboardButton("🌐 Открыть веб-приложение", callback_data="open_miniapp"),
                 InlineKeyboardButton("📋 Показать меню", callback_data="show_menu")
             ]])
             await update.message.reply_text(
@@ -3492,7 +3477,9 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(back_to_users_list, pattern="^back_to_users_list$"))
 
     # Callback обработчики бронирований
-    application.add_handler(CallbackQueryHandler(handle_booking_action, pattern="^(confirm_booking_|cancel_booking_)"))
+    application.add_handler(CallbackQueryHandler(handle_booking_action, pattern="^(confirm_booking_|cancel_booking_|info_booking_)"))
+
+    # Callback обработчики бонусов
     application.add_handler(CallbackQueryHandler(handle_bonus_request_action, pattern="^(approve_|reject_)"))
 
     # 8. ОБРАБОТЧИКИ УПРАВЛЕНИЯ ЗАКАЗАМИ
@@ -3613,5 +3600,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
