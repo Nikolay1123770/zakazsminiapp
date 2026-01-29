@@ -3590,7 +3590,7 @@ def main():
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
         print("🌐 MiniApp доступен по команде /webapp")
         print("🌐 Веб-сервер работает на: http://localhost:8080")
-        print("🌐 API Health: http://localhost:3000/api/health")
+        print("🌐 API Health: http://localhost:8080/api/health")
         print("🌐 Статический HTML: http://localhost:8080/static/index.html")
         if MINIAPP_URL:
             print(f"🌐 Внешний доступ: {MINIAPP_URL}")
@@ -3613,4 +3613,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
