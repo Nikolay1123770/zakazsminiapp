@@ -2865,13 +2865,13 @@ def run_web_server():
         config = uvicorn.Config(
             web_app, 
             host="0.0.0.0", 
-            port=80,  # Изменено с 3000 на 80
+            port=8080,  # Изменено с 3000 на 8080
             log_level="info",
             access_log=True,
             reload=False
         )
         server = uvicorn.Server(config)
-        logger.info("🌐 Веб-сервер MiniApp запущен на порту 80")
+        logger.info("🌐 Веб-сервер MiniApp запущен на порту 8080")
         loop.run_until_complete(server.serve())
     except Exception as e:
         logger.error(f"❌ Ошибка веб-сервера: {e}")
@@ -3257,7 +3257,7 @@ async def debug_miniapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "mini_app_url": MINIAPP_URL or "Не настроен",
         "static_dir": str(STATIC_DIR.absolute()),
         "index_file_exists": "✅ да" if INDEX_FILE.exists() else "❌ нет",
-        "port": 80,
+        "port": 8080,
         "threads": threading.active_count(),
         "tables": "\n".join([f"  • {table}: {status}" for table, status in table_status.items()]),
         "records": f"Меню: {menu_count}, Конфиг: {config_count}, Галерея: {gallery_count}, Бронирования: {bookings_count}, Пользователи: {users_count}"
@@ -3576,9 +3576,9 @@ def main():
         print("=" * 60)
         print("🤖 Бот запущен! Для остановки нажмите Ctrl+C")
         print("🌐 MiniApp доступен по команде /webapp")
-        print("🌐 Веб-сервер работает на: http://localhost:80")
-        print("🌐 API Health: http://localhost:80/api/health")
-        print("🌐 Статический HTML: http://localhost:80/static/index.html")
+        print("🌐 Веб-сервер работает на: http://localhost:8080")
+        print("🌐 API Health: http://localhost:8080/api/health")
+        print("🌐 Статический HTML: http://localhost:8080/static/index.html")
         if MINIAPP_URL:
             print(f"🌐 Внешний доступ: {MINIAPP_URL}")
         else:
