@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-BOT_TOKEN = os.getenv('BOT_TOKEN') or "8548648991:AAGCpfzNcVxzCvNFmdBqM5dPvt30vpPsbs8"
+BOT_TOKEN = os.getenv('BOT_TOKEN') or "8548648991:AAEwYfIevnbCHMxuJ8F_3ISfXbshbjtlpzw"
 
 
 async def get_my_id():
@@ -34,4 +34,5 @@ if __name__ == '__main__':
     print("🔍 Получаю информацию о пользователях...")
 
     asyncio.run(get_my_id())
+
 
