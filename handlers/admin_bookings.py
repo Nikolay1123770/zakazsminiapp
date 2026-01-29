@@ -27,15 +27,15 @@ def _format_booking_message(booking):
     try:
         booking_id = booking[0] if len(booking) > 0 else "N/A"
         user_id = booking[1] if len(booking) > 1 else None
-        booking_date = booking[2] if len(booking) > 2 else "Не указано"
-        booking_time = booking[3] if len(booking) > 3 else "Не указано"
-        guests = booking[4] if len(booking) > 4 else "0"
-        comment = booking[5] if len(booking) > 5 else ""
-        status = booking[6] if len(booking) > 6 else "pending"
-        created_at = booking[7] if len(booking) > 7 else ""
-        source = booking[8] if len(booking) > 8 else "bot"
-        customer_name = booking[9] if len(booking) > 9 else "Не указано"
-        customer_phone = booking[10] if len(booking) > 10 else "Не указано"
+        customer_name = booking[2] if len(booking) > 2 else "Не указано"
+        customer_phone = booking[3] if len(booking) > 3 else "Не указано"
+        booking_date = booking[4] if len(booking) > 4 else "Не указано"
+        booking_time = booking[5] if len(booking) > 5 else "Не указано"
+        guests = booking[6] if len(booking) > 6 else "0"
+        comment = booking[7] if len(booking) > 7 else ""
+        status = booking[8] if len(booking) > 8 else "pending"
+        created_at = booking[9] if len(booking) > 9 else ""
+        source = booking[10] if len(booking) > 10 else "bot"
         
         status_emoji = {
             'pending': '⏳',
@@ -49,6 +49,12 @@ def _format_booking_message(booking):
             'cancelled': 'Отменено'
         }
         
+        source_emoji = {
+            'bot': '🤖',
+            'miniapp': '🌐',
+            'web': '🌍'
+        }
+        
         message = (
             f"{status_emoji.get(status, '📅')} Бронирование #{booking_id}\n"
             f"👤 {customer_name}\n"
@@ -57,7 +63,7 @@ def _format_booking_message(booking):
             f"⏰ Время: {booking_time}\n"
             f"👥 Гостей: {guests}\n"
             f"📊 Статус: {status_text.get(status, status)}\n"
-            f"🔗 Источник: {source}\n"
+            f"{source_emoji.get(source, '🔗')} Источник: {source}\n"
         )
         
         if comment:
@@ -263,7 +269,7 @@ async def show_all_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = _format_booking_message(booking)
 
         # Для ожидающих бронирований показываем кнопки действий
-        if booking[6] == 'pending':  # Статус на индексе 6
+        if booking[8] == 'pending':  # Статус на индексе 8
             await message_manager.send_message(
                 update, context,
                 message,
@@ -277,9 +283,6 @@ async def show_all_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_temporary=False
             )
 
-
-# Обработка действий с бронированиями
-# В функции handle_booking_action добавьте обработку текстовых команд из MiniApp:
 
 async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка действий с бронированиями"""
@@ -319,7 +322,7 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
             
         text = update.message.text
-        # Проверяем команды типа /confirm_123, /cancel_123, /booking_123
+        # Проверяем команды типа /confirm_123, /cancel_123, /booking_123, /info_123
         if text.startswith('/confirm_'):
             action = 'confirm_booking'
             booking_id = text.replace('/confirm_', '')
@@ -331,6 +334,10 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             booking_id = text.replace('/booking_', '')
             await show_booking_details(update, context, booking_id)
             return
+        elif text.startswith('/info_'):
+            # Обработка деталей бронирования
+            booking_id = text.replace('/info_', '')
+            action = 'info_booking'
         else:
             return  # Не наша команда
     else:
@@ -351,7 +358,7 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
 
     cursor = db.conn.cursor()
     cursor.execute('''
-        SELECT b.*, u.first_name, u.last_name, u.telegram_id
+        SELECT b.*, u.first_name, u.last_name, u.telegram_id, u.username
         FROM bookings b 
         LEFT JOIN users u ON b.user_id = u.id 
         WHERE b.id = ?
@@ -367,37 +374,36 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             except Exception as e:
                 if "Message is not modified" not in str(e):
                     logger.error(f"Ошибка при обработке бронирования: {e}")
-        else:
-            await update.message.reply_text("❌ Бронирование не найдено.")
-        return
-
-    # ... остальная часть функции остается без изменений ...
-            except Exception as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"Ошибка при обработке бронирования: {e}")
                     from message_manager import message_manager
                     await message_manager.send_message(
                         update, context,
                         "❌ Бронирование не найдено.",
                         is_temporary=True
                     )
+        else:
+            await update.message.reply_text("❌ Бронирование не найдено.")
         return
 
+    # Извлекаем данные бронирования из кортежа
     booking_id = booking[0]
-    booking_date = booking[2]
-    booking_time = booking[3]
-    guests = booking[4]
+    user_id = booking[1]
+    customer_name = booking[2] if len(booking) > 2 else "Не указано"
+    customer_phone = booking[3] if len(booking) > 3 else "Не указано"
+    booking_date = booking[4] if len(booking) > 4 else "Не указано"
+    booking_time = booking[5] if len(booking) > 5 else "Не указано"
+    guests = booking[6] if len(booking) > 6 else "0"
+    comment = booking[7] if len(booking) > 7 else ""
+    status = booking[8] if len(booking) > 8 else "pending"
+    created_at = booking[9] if len(booking) > 9 else ""
+    source = booking[10] if len(booking) > 10 else "bot"
     
-    # Получаем имя клиента из полей таблицы bookings
-    customer_name = booking[9] if len(booking) > 9 else "Клиент"
-    customer_phone = booking[10] if len(booking) > 10 else "Не указан"
-    
-    # Пробуем получить данные пользователя, если он зарегистрирован
+    # Данные пользователя (если есть)
     user_first_name = booking[11] if len(booking) > 11 else None
     user_last_name = booking[12] if len(booking) > 12 else None
     user_telegram_id = booking[13] if len(booking) > 13 else None
+    username = booking[14] if len(booking) > 14 else None
     
-    # Если есть имя пользователя, используем его, иначе берем имя клиента
+    # Определяем имя для отображения
     display_name = customer_name
     if user_first_name:
         display_name = f"{user_first_name} {user_last_name or ''}".strip()
@@ -432,7 +438,8 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.edit_message_text(
                     f"✅ Бронирование #{booking_id} подтверждено.\n"
                     f"👤 Клиент: {display_name}\n"
-                    f"📞 Телефон: {customer_phone}"
+                    f"📞 Телефон: {customer_phone}\n"
+                    f"🔗 Источник: {source}"
                 )
             except Exception as e:
                 if "Message is not modified" not in str(e):
@@ -448,7 +455,8 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(
                 f"✅ Бронирование #{booking_id} подтверждено.\n"
                 f"👤 Клиент: {display_name}\n"
-                f"📞 Телефон: {customer_phone}"
+                f"📞 Телефон: {customer_phone}\n"
+                f"🔗 Источник: {source}"
             )
 
     elif action == 'cancel_booking':
@@ -479,7 +487,8 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.edit_message_text(
                     f"❌ Бронирование #{booking_id} отменено.\n"
                     f"👤 Клиент: {display_name}\n"
-                    f"📞 Телефон: {customer_phone}"
+                    f"📞 Телефон: {customer_phone}\n"
+                    f"🔗 Источник: {source}"
                 )
             except Exception as e:
                 if "Message is not modified" not in str(e):
@@ -495,8 +504,67 @@ async def handle_booking_action(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text(
                 f"❌ Бронирование #{booking_id} отменено.\n"
                 f"👤 Клиент: {display_name}\n"
-                f"📞 Телефон: {customer_phone}"
+                f"📞 Телефон: {customer_phone}\n"
+                f"🔗 Источник: {source}"
             )
+    
+    elif action == 'info_booking':
+        # Показываем детали бронирования
+        status_emoji = {
+            'pending': '⏳',
+            'confirmed': '✅',
+            'cancelled': '❌'
+        }
+
+        status_text = {
+            'pending': 'Ожидание',
+            'confirmed': 'Подтверждено',
+            'cancelled': 'Отменено'
+        }
+
+        source_emoji = {
+            'bot': '🤖',
+            'miniapp': '🌐',
+            'web': '🌍'
+        }
+
+        message = f"""
+📋 **Детали бронирования #{booking_id}**
+
+{status_emoji.get(status, '📅')} **Статус:** {status_text.get(status, status)}
+👤 **Клиент:** {customer_name}
+📱 **Телефон:** {customer_phone}
+📅 **Дата:** {booking_date}
+⏰ **Время:** {booking_time}
+👥 **Гостей:** {guests}
+{source_emoji.get(source, '🔗')} **Источник:** {source}
+🕒 **Создано:** {created_at}
+"""
+
+        if comment:
+            message += f"💬 **Комментарий:** {comment}\n"
+
+        if user_first_name:
+            message += f"\n👤 **Пользователь:** {user_first_name} {user_last_name or ''}"
+            if username:
+                message += f" (@{username})"
+            message += f"\n🆔 **User ID:** {user_id}"
+            if user_telegram_id:
+                message += f"\n📱 **Telegram ID:** {user_telegram_id}"
+
+        if query:
+            try:
+                await query.edit_message_text(message, parse_mode='Markdown')
+            except Exception as e:
+                logger.error(f"Ошибка при показе деталей бронирования: {e}")
+                from message_manager import message_manager
+                await message_manager.send_message(
+                    update, context,
+                    message,
+                    is_temporary=False
+                )
+        else:
+            await update.message.reply_text(message, parse_mode='Markdown')
     else:
         if query:
             try:
@@ -539,15 +607,15 @@ async def show_booking_details(update: Update, context: ContextTypes.DEFAULT_TYP
     # Форматируем сообщение
     booking_id = booking[0]
     user_id = booking[1]
-    booking_date = booking[2]
-    booking_time = booking[3]
-    guests = booking[4]
-    comment = booking[5]
-    status = booking[6]
-    created_at = booking[7]
-    source = booking[8]
-    customer_name = booking[9] if len(booking) > 9 else "Не указано"
-    customer_phone = booking[10] if len(booking) > 10 else "Не указано"
+    customer_name = booking[2] if len(booking) > 2 else "Не указано"
+    customer_phone = booking[3] if len(booking) > 3 else "Не указано"
+    booking_date = booking[4] if len(booking) > 4 else "Не указано"
+    booking_time = booking[5] if len(booking) > 5 else "Не указано"
+    guests = booking[6] if len(booking) > 6 else "0"
+    comment = booking[7] if len(booking) > 7 else ""
+    status = booking[8] if len(booking) > 8 else "pending"
+    created_at = booking[9] if len(booking) > 9 else ""
+    source = booking[10] if len(booking) > 10 else "bot"
     user_first_name = booking[11] if len(booking) > 11 else None
     user_last_name = booking[12] if len(booking) > 12 else None
     user_telegram_id = booking[13] if len(booking) > 13 else None
@@ -565,6 +633,12 @@ async def show_booking_details(update: Update, context: ContextTypes.DEFAULT_TYP
         'cancelled': 'Отменено'
     }
 
+    source_emoji = {
+        'bot': '🤖',
+        'miniapp': '🌐',
+        'web': '🌍'
+    }
+
     message = f"""
 📋 **Детали бронирования #{booking_id}**
 
@@ -574,7 +648,7 @@ async def show_booking_details(update: Update, context: ContextTypes.DEFAULT_TYP
 📅 **Дата:** {booking_date}
 ⏰ **Время:** {booking_time}
 👥 **Гостей:** {guests}
-🔗 **Источник:** {source}
+{source_emoji.get(source, '🔗')} **Источник:** {source}
 🕒 **Создано:** {created_at}
 """
 
@@ -621,15 +695,15 @@ async def handle_info_booking(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Форматируем сообщение
     booking_id = booking[0]
     user_id = booking[1]
-    booking_date = booking[2]
-    booking_time = booking[3]
-    guests = booking[4]
-    comment = booking[5]
-    status = booking[6]
-    created_at = booking[7]
-    source = booking[8]
-    customer_name = booking[9] if len(booking) > 9 else "Не указано"
-    customer_phone = booking[10] if len(booking) > 10 else "Не указано"
+    customer_name = booking[2] if len(booking) > 2 else "Не указано"
+    customer_phone = booking[3] if len(booking) > 3 else "Не указано"
+    booking_date = booking[4] if len(booking) > 4 else "Не указано"
+    booking_time = booking[5] if len(booking) > 5 else "Не указано"
+    guests = booking[6] if len(booking) > 6 else "0"
+    comment = booking[7] if len(booking) > 7 else ""
+    status = booking[8] if len(booking) > 8 else "pending"
+    created_at = booking[9] if len(booking) > 9 else ""
+    source = booking[10] if len(booking) > 10 else "bot"
     user_first_name = booking[11] if len(booking) > 11 else None
     user_last_name = booking[12] if len(booking) > 12 else None
     user_telegram_id = booking[13] if len(booking) > 13 else None
@@ -647,6 +721,12 @@ async def handle_info_booking(update: Update, context: ContextTypes.DEFAULT_TYPE
         'cancelled': 'Отменено'
     }
 
+    source_emoji = {
+        'bot': '🤖',
+        'miniapp': '🌐',
+        'web': '🌍'
+    }
+
     message = f"""
 📋 **Детали бронирования #{booking_id}**
 
@@ -656,7 +736,7 @@ async def handle_info_booking(update: Update, context: ContextTypes.DEFAULT_TYPE
 📅 **Дата:** {booking_date}
 ⏰ **Время:** {booking_time}
 👥 **Гостей:** {guests}
-🔗 **Источник:** {source}
+{source_emoji.get(source, '🔗')} **Источник:** {source}
 🕒 **Создано:** {created_at}
 """
 
@@ -970,7 +1050,7 @@ async def show_bookings_by_selected_date(update: Update, context: ContextTypes.D
         message = _format_booking_message(booking)
 
         # Для ожидающих бронирований показываем кнопки действий
-        if booking[6] == 'pending':
+        if booking[8] == 'pending':  # Статус на индексе 8
             await message_manager.send_message(
                 update, context,
                 message,
@@ -1066,9 +1146,9 @@ async def process_cancellation_reason(update: Update, context: ContextTypes.DEFA
     db.conn.commit()
 
     # Получаем данные для уведомления
-    booking_date = booking[2]
-    booking_time = booking[3]
-    guests = booking[4]
+    booking_date = booking[4] if len(booking) > 4 else "Не указано"
+    booking_time = booking[5] if len(booking) > 5 else "Не указано"
+    guests = booking[6] if len(booking) > 6 else "0"
     user_telegram_id = booking[13] if len(booking) > 13 else None
     
     # Пытаемся уведомить пользователя, если он зарегистрирован
@@ -1089,7 +1169,7 @@ async def process_cancellation_reason(update: Update, context: ContextTypes.DEFA
     from message_manager import message_manager
     
     # Получаем имя для отображения
-    customer_name = booking[9] if len(booking) > 9 else "Клиент"
+    customer_name = booking[2] if len(booking) > 2 else "Клиент"
     user_first_name = booking[11] if len(booking) > 11 else None
     user_last_name = booking[12] if len(booking) > 12 else None
     
